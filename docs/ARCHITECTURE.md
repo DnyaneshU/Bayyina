@@ -1,168 +1,147 @@
 # Bayyina — Architecture & Technical Reference
 
-> **Status:** Living document. Source of truth for *how* it is built.
-> Feeds Idea Canvas boxes F–I, and becomes the Stage 2 architecture diagram +
-> technical README required on 14 October. Last updated: 2026-09-07.
+> **Status:** Final architecture for the Ignyte × ElevenLabs submission.
+> Source of truth for *how* it is built. Feeds Idea Canvas boxes F–I, and becomes
+> the Stage 2 architecture diagram + technical README due 14 October.
+> Last updated: 2026-09-07.
 
 ---
 
 ## 1. Governing Principles
 
-> **1 · Determinism at the core. Language only at the edge.**
-> The LLM triages, slot-fills, and speaks. It never computes, decides, or interprets.
+> **Bayyina converts published tenancy rules into a safe, conversational workflow
+> that determines what can be determined, produces the evidence a person needs to
+> act, and stops whenever the facts require human judgement.**
 
-> **2 · The agent acts, but never decides.**
-> It assembles, lodges, tracks and follows up. Every determination belongs to a
-> human officer.
+That sentence is the specification. The three principles below are how it is
+enforced in code.
+
+> **1 · Determinism at the core. Language only at the edge.**
+> The LLM diagnoses, slot-fills and speaks. It never computes, decides, or interprets.
+
+> **2 · The agent prepares. It never submits, and it never argues.**
+> The resident reviews and acts. Authorities decide.
+
+> **3 · Every external permission is an adapter, never a dependency.**
+> If a government integration is absent, the product still works completely.
 
 If the engine returns no citation, **the agent is structurally incapable of
-answering** — it is not restrained by a prompt, it has nothing to say. If an
-action would constitute a decision, **there is no code path that performs it.**
+answering.** If a document would require persuasive prose, **the generator has no
+code path that produces it.** These are not prompt instructions.
 
 ---
 
-## 2. System Diagram
+## 2. The Adapter Boundary — the most important line in this document
+
+```
+╔═══════════════════════════════════════════════════════════════════╗
+║  EVERYTHING BELOW THIS LINE REQUIRES NOBODY'S PERMISSION.         ║
+║  Open data · caller-stated facts · our engine · our generator.    ║
+║  The product is complete and shippable without a single           ║
+║  government integration.                                          ║
+╚═══════════════════════════════════════════════════════════════════╝
+                              ▲
+                              │  ADAPTER INTERFACE (Mode C)
+                              │  Implemented as an interface with no
+                              │  concrete implementation. Declared
+                              │  absent — never faked, never mocked
+                              │  to look present.
+                              ▼
+              [ Authority submission — DLD / RDC / MOHRE ]
+                      NOT IMPLEMENTED · NOT CLAIMED
+```
+
+| Mode | Behaviour | Requires | Status |
+|---|---|---|---|
+| **A · Prepare** | Evidence pack + factual response template delivered to the caller. They send it | Nothing but us | **The product** |
+| **B · Sandbox** | Case lands in *our* case API and *our* officer dashboard | Nothing but us | Built — proves the loop |
+| **C · Authority** | Direct submission into a government queue | Signed integration | **Interface only** |
+
+---
+
+## 3. System Diagram
 
 ```
 ┌── CHANNELS ────────────────────────────────────────────────────────────┐
-│  Twilio inbound  ·  consented outbound callback  ·  WhatsApp           │
-│  WebRTC widget   ·  public web checker                                 │
+│  Twilio voice (inbound)  ·  WebRTC widget  ·  public web checker        │
+│  Twilio SMS / WhatsApp   ← OTP out, evidence pack out, reminders out    │
 └───────────────────────────────┬────────────────────────────────────────┘
                                 │
 ┌── LISTEN ──────────────────────▼───────────────────────────────────────┐
 │  Scribe v2 Realtime + keyterm biasing                                   │
-│  (Ejari, RERA, Makani, Tawtheeq, MOHRE, gratuity, AED amounts)          │
+│  (Ejari, RERA, Makani, AED amounts, Dubai area names)                   │
 │  Language auto-detect on first utterance                                │
 └───────────────────────────────┬────────────────────────────────────────┘
                                 │
 ┌── AGENT · ElevenLabs Workflows ▼───────────────────────────────────────┐
+│  [1 Greet · Disclose]   AI disclosure · recording · not legal advice    │
+│  [2 Triage]             served domain? answerable or interpretive?      │
+│         │                          └────► [Human handoff] ◄──┐ G2 G6    │
+│  [3 Diagnose]           discovers which facts the rule needs │          │
+│         │               readback + confirm each value (G3)   │          │
+│  [4 Verify]             OTP over SMS/WhatsApp locks session  │          │
+│  [5 Compute]            calls Rules API. COMPUTES NOTHING. ──┘          │
+│  [6 Explain]            renders result · cites clause aloud (G1)        │
+│  [7 Generate]           evidence pack built (G10 template-only)         │
+│  [8 Dispatch]           pack link sent to caller's phone, on the call   │
+│  [9 Protect]            deadline armed under explicit consent (G8)      │
+└───────────────────────────────┬────────────────────────────────────────┘
+                                │
+┌── EVIDENCE ENGINE ─────────────▼───────────────────────────────────────┐
+│  Deterministic template renderer. Inputs: evaluation records only.      │
+│  NO free-text generation. Produces the case report + response template. │
+│  Bayyina-branded · marked "not an official determination"               │
+└───────────────────────────────┬────────────────────────────────────────┘
+                                │
+┌── CASE STORE (ours) ───────────▼───────────────────────────────────────┐
+│  cases · evidence_packs · deadlines · consent · audit                   │
+│  Officer dashboard reads from here (Mode B)                             │
+│  Agent-reachable statuses can never be terminal (G4)                    │
+└───────────────────────────────┬────────────────────────────────────────┘
+                                │
+┌── RULES REGISTRY ◄── THE ASSET ▼───────────────────────────────────────┐
+│  rent_increase.dubai.decree_43_2013     @v1                             │
+│  notice_validity.dubai.law_26_2007_a14  @v1                             │
 │                                                                         │
-│  [1 Greet · Disclose · Consent] AI disclosure · recording · callback    │
-│           │                      consent captured and logged (G8)       │
-│  [2 Triage] served domain? answerable or interpretive?                  │
-│           │                        └──────► [Human handoff] ◄──┐        │
-│           ▼                                                    │ G2 G6  │
-│  [3 Slot-fill sub-agent] readback + confirm → token (G3)       │        │
-│           ▼                                                    │        │
-│  [4 Verdict] calls registry. COMPUTES NOTHING. ────────────────┘        │
-│           ▼                                                             │
-│  [5 Explain] renders verdict · cites clause aloud (G1)                  │
-│           ▼                                                             │
-│  ══ THE ACTION LAYER — why this is not a chatbot ══                     │
-│  [6 Assemble] builds the evidence pack on the call                      │
-│           ▼                                                             │
-│  [7 Lodge]    two-key submit → review queue (G4)                        │
-│           ▼    TOOL-SCOPED: only this node holds the filing tool        │
-│  [8 Track]    registers the statutory deadline                          │
-│           ▼                                                             │
-│  [9 Follow-up] consented outbound callback before the window closes     │
-└───────────────────────────────┬────────────────────────────────────────┘
-                                │
-┌── HUMAN-IN-THE-LOOP ───────────▼───────────────────────────────────────┐
-│  OFFICER REVIEW QUEUE — every lodged case lands here                    │
-│  The agent prepares. A qualified officer approves, amends or rejects.   │
-│  NO CODE PATH BYPASSES THIS QUEUE.                                      │
-└───────────────────────────────┬────────────────────────────────────────┘
-                                │
-                                ▼   (post-approval, out of our scope)
-                     Execution in the authority's own system
-
-┌── CONSENTED IDENTITY (sandboxed in v1) ────────────────────────────────┐
-│  UAE Pass — caller authorises access to their own Ejari / MOHRE record  │
-│  Per-call, scoped, logged. We hold no back-door.                        │
-└───────────────────────────────┬────────────────────────────────────────┘
-                                │
-┌── REGULATORY RULES REGISTRY ◄── THE ASSET ─────────────────────────────┐
-│  rent_increase.dubai.decree_43_2013      @v1                            │
-│  notice_validity.dubai.law_26_2007_a14   @v1                            │
-│  gratuity.uae.decree_33_2021_a51         @v1                            │
-│                                                                         │
-│  pure fn(inputs) → {verdict, computed, rule_id, rule_version,           │
+│  pure fn(inputs) → {state, verdict, computed, rule_id, rule_version,    │
 │                     citation, confidence, review_status, input_sources} │
 │  UNSIGNED OR TAMPERED → SERVICE REFUSES TO BOOT (G7)                    │
-│  every evaluation and every tool call → immutable record (G9)           │
 └───────────────────────────────┬────────────────────────────────────────┘
                                 │
 ┌── SOURCES ─────────────────────▼───────────────────────────────────────┐
-│  Source-law corpus → RAG for CITATION ONLY, never computation           │
-│  DuckDB: dld_rent_contracts-open → comparable medians, snapshotted      │
+│  Citations come from each signed rule's verbatim clause - no retrieval  │
+│  DuckDB ← Dubai Pulse dld_rent_contracts-open, snapshotted + dated      │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 3. Tech Stack and Why
+## 4. Tech Stack
 
 | Layer | Choice | Rationale |
 |---|---|---|
-| Language | Python 3.11+ | The work is data + rules; the ETL and the engine want the same language |
-| API | FastAPI | Typed request/response models give the agent tool contracts for free |
-| Rule schema | Pydantic v2 | Rule validation *is* schema validation. Malformed rule = load failure |
-| Rule storage | YAML in `rules/`, in git | Version control **is** the version history. Diffs are reviewable by a non-programmer |
-| Market data | DuckDB | 4.2M rows, analytical queries, single file, zero infrastructure |
-| Frontend | Static HTML/CSS/JS + Jinja | No build step. The provenance page renders from the same YAML the engine loads |
-| Tests | pytest | — |
-| Voice | ElevenLabs Agents | Configuration, not code. Webhook tools point at our FastAPI |
-| Deploy | Single container | Web checker, API and agent webhooks in one service |
+| Language | Python 3.11+ | ETL and rules engine want the same language |
+| API | FastAPI | Typed models give the agent its tool contracts for free |
+| Rule schema | Pydantic v2 | Rule validation *is* schema validation |
+| Rule storage | YAML in git | Version control **is** the version history; diffs readable by a non-programmer |
+| Market data | DuckDB | 9.8M rows, single file, zero infrastructure |
+| Case store | SQLite | Cases, deadlines, consent, audit. Zero setup |
+| Documents | Jinja2 → HTML → PDF | **Templates, not generation.** The constraint is the mechanism (G10) |
+| Frontend | Vite + React + TypeScript + Tailwind | A typed API client catches contract drift at compile time. Builds to static assets the backend serves, so deployment stays one container (D-019) |
+| i18n | i18next | Three languages; untranslated keys fall back to readable English, never a raw key |
+| Voice | ElevenLabs Agents | Configuration; webhook tools point at our FastAPI |
+| Telephony | Twilio | Voice inbound, SMS/WhatsApp out |
+| Deploy | Single container | Under $20/month all-in |
 
-**Rejected:** a separate SPA framework (build complexity for no gain); a hosted
-database (a read-only DuckDB file is simpler); a rules DSL (YAML + Pydantic is
-enough for three rules; a DSL is premature abstraction).
-
----
-
-## 4. Repository Structure
-
-```
-IgNyte/
-├── plan.md
-├── README.md                        # Stage 2 technical README
-├── docs/
-│   ├── DESIGN.md                    # what and why
-│   ├── ARCHITECTURE.md              # this file — how
-│   └── CANVAS.md                    # live Stage 1 submission draft
-├── rules/                           # THE CORPUS — signed, versioned
-│   ├── rent_increase.dubai.decree_43_2013.v1.yaml
-│   ├── notice_validity.dubai.law_26_2007_a14.v1.yaml
-│   └── gratuity.uae.decree_33_2021_a51.v1.yaml
-├── src/bayyina/
-│   ├── registry/
-│   │   ├── schema.py                # Pydantic rule models
-│   │   ├── signing.py               # canonical hash, sign, verify
-│   │   ├── loader.py                # G7 — refuses unsigned or tampered
-│   │   └── evaluator.py             # dispatch inputs → verdict
-│   ├── rules_logic/
-│   │   ├── banded_percentage.py
-│   │   ├── notice_period.py
-│   │   └── gratuity.py
-│   ├── actions/                     # THE ACTION LAYER
-│   │   ├── evidence_pack.py         # assemble the filing document
-│   │   ├── review_queue.py          # lodge — the only write path
-│   │   └── deadlines.py             # register and schedule callbacks
-│   ├── market/
-│   │   ├── ingest.py
-│   │   └── comparables.py
-│   ├── guardrails/
-│   │   ├── triage.py                # G2 interpretive, G6 distress
-│   │   ├── tokens.py                # G3 confirmation tokens
-│   │   └── consent.py               # G8 consent and opt-out
-│   ├── audit.py                     # G9 evaluation + tool-call trace
-│   └── api/
-│       ├── app.py
-│       ├── routes_evaluate.py
-│       ├── routes_agent.py
-│       ├── routes_filing.py
-│       └── routes_provenance.py
-├── web/
-├── agent/
-└── tests/
-```
+**Rejected:** UAE Pass in v1 (a permission we do not have — OTP achieves session
+binding without it); a hosted database (SQLite + DuckDB are sufficient and
+portable); an LLM document writer (see G10).
 
 ---
 
-## 5. Rule Specification
+## 5. Rules Registry
 
-### 5.1 Format
+### 5.1 Rule format
 
 ```yaml
 id: rent_increase.dubai.decree_43_2013
@@ -171,23 +150,21 @@ jurisdiction: AE-DU
 effective_from: 2013-12-09
 effective_to: null
 
-source:
+source:                      # G1 lives here: every field is required
   document_id: dubai_decree_43_2013
-  title: "Decree No. (43) of 2013 Determining Increases in Real Property Rent"
-  clause: "Article 1"
-  url: "https://dubailand.gov.ae/"
+  title: Decree No. (43) of 2013 Determining Increases in Real Property Rent
+  clause: Article 1
+  url: https://dubailand.gov.ae/
   verbatim: |
-    Sets maximum permitted percentage increase in property rent by reference to
-    how far the current rent falls below the average market rental value for a
-    similar property, as determined by the RERA rental index.
+    The maximum rent increase for real property units in the Emirate of Dubai
+    shall be determined as follows: [...]
 
-logic: banded_percentage
+logic: banded_percentage     # an enum, not a free string
 
-inputs:
-  current_annual_rent:  { type: money, currency: AED, required: true }
-  market_average_rent:  { type: money, currency: AED, required: true,
-                          source_field: market_average_source }
-  proposed_annual_rent: { type: money, currency: AED, required: true }
+inputs:                      # a declaration the evaluator executes
+  current_annual_rent:  { type: money, currency: AED, required: true, derived: false }
+  market_average_rent:  { type: money, currency: AED, required: true, derived: true  }
+  proposed_annual_rent: { type: money, currency: AED, required: true, derived: false }
 
 bands:                       # gap = (market_average - current) / market_average
   - { gap_from: 0.00, gap_to: 0.10, max_increase: 0.00 }
@@ -196,141 +173,290 @@ bands:                       # gap = (market_average - current) / market_average
   - { gap_from: 0.30, gap_to: 0.40, max_increase: 0.15 }
   - { gap_from: 0.40, gap_to: null, max_increase: 0.20 }
 
-review_notes:
-  - "Band boundaries are inclusive at the upper bound. Confirm with reviewer."
+review_notes:                # signed alongside the rule, printed on provenance
+  - "INTERPRETATION. The decree states whole percentages, leaving 10-11% [...]"
 
 approval:
   status: provisional        # unsigned | provisional | certified
   approved_by: "Bayyina team"
-  approved_at: "2026-09-07T00:00:00Z"
-  signature: "sha256:..."    # canonical hash of this rule minus the approval block
+  approved_at: "2026-09-09T08:00:29Z"
+  signature: "sha256:bc45..."  # canonical hash of this rule minus the approval block
 ```
 
-### 5.2 Approval status — the three states
+A notice rule replaces `bands` with a `notice` block carrying `required_days: 90`.
+**The parameter belongs to the rule, never to configuration** (D-027): it sits
+inside the bytes the signature covers, so an operator cannot change what the law
+says while the signature still verifies.
 
-| Status | Loader behaviour | Agent behaviour |
+**Nine things the loader rejects before the service accepts traffic.** A rule
+file is static data edited by hand, so everything knowable now is checked now —
+failing while a caller is on the line is the outcome each of these prevents.
+
+| Rejected | Because |
+|---|---|
+| Unknown field anywhere | A typo silently ignored is a wrong verdict waiting |
+| Unknown `logic` value | Logic nobody implemented would fail at dispatch, mid-call |
+| Wrong parameter block | A notice rule with a band table reads as configured and is never consulted |
+| Undeclared input the logic reads | The evaluator could not coerce or require it |
+| Declared input the logic ignores | We would ask a caller for it on the phone and discard it |
+| Money input with no currency | An amount with no unit is not an amount |
+| Band table malformed | A gap with no defined answer, or `20` written for `0.20` |
+| `required_days` outside 1-1095 | Months entered as days, or 90 typed as 9000 |
+| `effective_to` before `effective_from` | The rule was never in force |
+
+**`review_notes` are data, not comments.** Signing rewrites the file, so a YAML
+comment would be unsigned commentary on signed content. Every open question — the
+undefined 10-11% band, "unless the parties agree otherwise", the unofficial
+translation — is recorded in a field the signature covers and the provenance page
+prints (D-029).
+
+### 5.2 Approval status
+
+| Status | Loader | Agent |
 |---|---|---|
-| `unsigned` | **Raises `UnsignedRuleError`. The service does not boot.** | — |
-| `provisional` | Loads | **Discloses aloud that the encoding is provisional and pending qualified review** |
+| `unsigned` | **Raises. The service does not boot.** | — |
+| `provisional` | Loads | **Discloses aloud that the encoding awaits qualified review** |
 | `certified` | Loads | Speaks normally |
 
-**We ship as `provisional` and we say so.** This is the honest position given we
-hold no retained counsel ([DESIGN.md](DESIGN.md) §9), and stating it is worth more
-than implying a reviewer we do not have.
+**We ship `provisional` and we say so.** Honest, given we hold no retained
+counsel — and worth more than implying a reviewer we do not have.
 
-### 5.3 The three v1 rules
+### 5.2.1 The signing protocol — how G7 is actually operated
 
-| Rule | Logic | Key detail |
-|---|---|---|
-| `rent_increase.dubai.decree_43_2013` | `banded_percentage` | Five bands: 0/5/10/15/20% |
-| `notice_validity.dubai.law_26_2007_a14` | `notice_period` | ≥90 days before expiry |
-| `gratuity.uae.decree_33_2021_a51` | `gratuity` | <1yr none; 1–5yr 21 days/yr; >5yr 21×5 + 30/yr after; capped at 2 years' wage; **basic** salary only |
+A judge who takes the guardrail seriously will ask how the hash is produced and
+where it is checked. Three places, deliberately:
 
-**Open review note on gratuity:** the daily-wage convention (`basic ÷ 30` vs.
-`basic × 12 ÷ 365`) is a genuine ambiguity. v1 encodes `basic ÷ 30` and records
-the alternative in `review_notes`. **The provenance mechanism surfacing a question
-rather than burying it.**
+**1 · Signing (manual, by the approver).**
+
+```bash
+python scripts/sign_rule.py rules/rent_increase.dubai.decree_43_2013.v1.yaml
+# → signed rent_increase.dubai.decree_43_2013.v1.yaml [provisional] by Bayyina team
+#     sha256:bc45809fffe25406e2d032825cc3f60cbee8c003ddb5acc91b57c2f92c6400ab
+```
+
+The script canonicalises the rule body **excluding its approval block** — JSON
+with sorted keys and no incidental whitespace — takes SHA-256, and writes the
+digest plus approver and timestamp back into `approval`. Excluding the approval
+block is what makes the signature stable when only metadata changes.
+
+**2 · CI (every push).**
+
+```bash
+python scripts/verify_corpus.py rules/     # exits non-zero on any mismatch
+```
+
+A rule edited without re-signing **fails the build**. This is the control that
+catches an honest mistake, not just an attack.
+
+**3 · Runtime (every boot).**
+
+`create_app()` calls `load_rules()` before serving traffic. `unsigned` raises
+`UnsignedRuleError`; a digest mismatch raises `TamperedRuleError`. **The process
+exits.** The check runs in `create_app()` and not in a startup event, because a
+startup event that raises still leaves a constructed app behind. `GET /healthz`
+re-reports corpus state, so a deployment is verifiable from outside rather than
+on the assumption that it booted the way we think it did.
+
+Signing is manual and deliberately unautomated: **a signature is a human
+attestation, and automating it would make it meaningless.**
+
+### 5.3 The two v1 rules
+
+Both are written, signed `provisional`, and load. CI verifies their signatures on
+every push with no `--allow-empty` escape.
+
+| Rule | Logic | Detail | Review notes |
+|---|---|---|---|
+| `rent_increase.dubai.decree_43_2013` | `banded_percentage` | Five bands: 0/5/10/15/20% | 6 |
+| `notice_validity.dubai.law_26_2007_a14` | `notice_period` | ≥90 days before expiry | 6 |
+
+**Only `market_average_rent` is derived.** Every other input is the caller's own
+account, which is why G5 constrains the rent rule and cannot constrain the notice
+rule — and why a caller whose area has too little data still leaves with an
+answer to the notice question and an evidence pack containing it.
+
+The twelve review notes are the honest part. They record the decree's undefined
+10–11% band, the notice period's "unless the parties agree otherwise", that both
+verbatim texts are unofficial English translations, and that neither URL is yet a
+permanent link to the gazetted text. **A provisional rule with no open questions
+is a rule nobody examined**, and a test asserts every rule carries some.
 
 ### 5.4 Evaluation record
 
 ```json
 {
-  "eval_id": "ev_01J8X...",
+  "eval_id": "ev_8f1c4b2a…",
   "rule_id": "rent_increase.dubai.decree_43_2013",
   "rule_version": 1,
-  "rule_signature": "sha256:9f2a...",
+  "rule_signature": "sha256:bc45…",
   "review_status": "provisional",
-  "inputs": { "current_annual_rent": 85000, "market_average_rent": 91000,
-              "proposed_annual_rent": 102000 },
-  "input_sources": { "market_average_rent": "dld_open_rent_contracts_derived",
-                     "market_snapshot": "2026-Q3" },
+  "state": "CLEAR",
   "verdict": "not_permitted",
-  "computed": { "gap_pct": 0.0659, "band_matched": 0, "max_increase_pct": 0.00,
-                "max_lawful_rent": 85000, "proposed_increase_pct": 0.20 },
-  "citation": { "document_id": "dubai_decree_43_2013", "clause": "Article 1" },
-  "confidence": 0.94,
-  "created_at": "2026-09-07T11:04:22Z"
+  "inputs": { "current_annual_rent": "80000", "market_average_rent": "87000",
+              "proposed_annual_rent": "96000" },
+  "input_sources": { "current_annual_rent": "caller_stated",
+                     "market_average_rent": "dld_open_rent_contracts_derived",
+                     "proposed_annual_rent": "caller_stated",
+                     "market_snapshot": "2026-Q3" },
+  "computed": { "gap_pct": 0.08046, "band_matched": 0, "max_increase_pct": 0.0,
+                "max_lawful_rent": "80000.00", "proposed_increase_pct": 0.2 },
+  "citation": { "document_id": "dubai_decree_43_2013",
+                "title": "Decree No. (43) of 2013 …",
+                "clause": "Article 1",
+                "url": "https://dubailand.gov.ae/",
+                "verbatim": "The maximum rent increase … " },
+  "evidence": { "contract_count": 5557, "snapshot_id": "2026-Q3" },
+  "conditions": [],
+  "confidence": 1.0,
+  "created_at": "2026-09-09T08:00:29Z"
 }
 ```
+
+`input_sources` distinguishes **caller-stated** from **derived** values on every
+field, and the evaluator refuses a call in which any supplied input lacks one.
+The evidence pack prints that distinction rather than hiding it.
+
+**The record type is where two guardrails are enforced.**
+
+- **G1** — `citation` is non-nullable and every field within it has a minimum
+  length. An answer with no clause behind it is not a shape the system can hold.
+- **G5** — a record in `HUMAN_REVIEW_REQUIRED` cannot carry a verdict, a computed
+  figure, or a confidence number. The validator rejects it. Below the evidence
+  threshold **the rule is never run**, so there is no figure held anywhere for a
+  later step to decide to speak (D-030).
+
+`evidence` sits beside `computed` rather than inside it for exactly that reason:
+a thin-data outcome still discloses *how* thin — "four registered contracts" — 
+while carrying no figure about the caller's own rent.
+
+**A conditional answer must name its condition.** `conditions` is empty for
+`CLEAR`, non-empty for `CLEAR_WITH_CONDITIONS`, and the record refuses to
+validate otherwise. It holds keys, not sentences, so each surface renders them in
+the reader's own language:
+
+| Key | Meaning | Reached when |
+|---|---|---|
+| `thin_comparable_data` | We derived the market figure from 10–29 contracts | Voice and web, on our own comparable |
+| `market_average_not_derived` | The market figure was supplied to us, not computed by us | The web checker today, until T2.3 |
+
+The second exists because inventing a contract count for a figure someone typed
+would be fabricating evidence (D-049). `confidence` is `None` in that case: we
+cannot state a confidence in evidence we did not gather.
+
+`confidence` is a **defined quantity, not an estimate**: the proportion of the
+30-contract full-confidence threshold that this evidence reaches, capped at 1.0.
+It describes the depth of market data behind a derived input. It is not a
+probability that the verdict is correct, and nothing presents it as one.
 
 ---
 
 ## 6. Guardrails — Mechanisms, Not Intentions
 
-Each is enforced by a schema contract, a load-time check, or a tool scope.
-**None is a prompt instruction.** Rows G1–G6 form Idea Canvas box I; G7–G9 are the
-architectural controls behind them.
+Ten. Each enforced by a schema contract, a load-time check, a tool scope, or the
+absence of a code path. **None is a prompt instruction.**
 
-| # | Guardrail | Mechanism | Where |
-|---|---|---|---|
-| **G1** | **Citation-or-silence** | The Explain tool's response schema requires a non-null `citation`. On null the workflow branches to escalation — **the answer path does not exist** | `api/routes_agent.py` + workflow edge |
-| **G2** | **Interpretive tripwire** | Per-turn classifier for interpretation-seeking language ("will I win", "should I"). Fires transfer from any node | `guardrails/triage.py` |
-| **G3** | **Confidence floor** | Amounts and dates issue a confirmation token only after spoken readback. `/evaluate` rejects requests without one | `guardrails/tokens.py` |
-| **G4** | **Two-key filing** | The filing tool requires that token **and** writes only to the officer review queue. **No code path files directly** | `actions/review_queue.py` |
-| **G5** | **Stale / thin data guard** | Snapshots carry a validity window; fewer than 10 comparable contracts returns `insufficient_data` and no number may be quoted | `market/comparables.py` |
-| **G6** | **Distress detection** | Homelessness, abuse, self-harm signals → immediate warm transfer, logged | `guardrails/triage.py` |
-| **G7** | **Unsigned-rule refusal** | The loader verifies each signature against a canonical hash of the rule body. Unsigned or tampered → **the service fails to boot** | `registry/loader.py` |
-| **G8** | **Consent and opt-out** | An outbound callback requires a recorded consent token from the inbound call. Opt-out ends the session immediately, writes a suppression record, and no further call can be scheduled | `guardrails/consent.py` |
-| **G9** | **Auditable lineage** | Every evaluation *and every tool call* writes an append-only record: inputs, rule version, signature, source attribution, outcome, timestamp | `audit.py` |
+| # | Guardrail | Mechanism |
+|---|---|---|
+| **G1** | **Citation-or-silence** | `EvaluationRecord.citation` is non-nullable and each field within it has a minimum length. A verdict with no clause behind it **is not a shape the system can construct**, so escalation is the only remaining branch |
+| **G2** | **Interpretive tripwire** | Per-turn classifier for interpretation-seeking language ("will I win", "should I"). Fires transfer from any node |
+| **G3** | **Confirmed data only** | Amounts and dates issue a confirmation token only after spoken readback. The Rules API rejects requests without one |
+| **G4** | **Never submits to an authority** | Mode C is an interface with **no concrete implementation**. There is no code path to a government system, and no agent-reachable case status is terminal |
+| **G5** | **Insufficient data over false precision** | Below 10 comparable contracts **the rule is never run**. A `HUMAN_REVIEW_REQUIRED` record carrying a verdict, a computed figure or a confidence number fails validation, so there is no number held anywhere to speak |
+| **G6** | **Distress detection** | Homelessness, abuse, self-harm signals → immediate warm transfer, logged |
+| **G7** | **Unsigned-rule refusal** | The loader verifies each signature against a canonical hash of the rule body. Unsigned, tampered, **structurally malformed, or empty** → **the service fails to boot**. `Evaluator` re-checks on construction, so the guarantee holds at the thing that produces verdicts and not only at boot (D-034). One bad rule fails the whole corpus; partial loading would mean running on logic nobody reviewed |
+| **G8** | **Consent and opt-out** | Reminders require an explicit opt-in recorded on the call. Opt-out writes an irreversible suppression record. **No bulk outbound exists in the codebase** |
+| **G9** | **Auditable lineage** | Every evaluation appends one hash-chained JSON line: inputs, source per field, rule version, signature, outcome, timestamp. `AuditLog` exposes no update or delete, and appends under a lock. `verify_chain()` names the first edited or inserted entry |
+| **G10** | **States, never argues** | The evidence generator accepts **only** structured evaluation records and renders Jinja templates. It has no LLM in its call path, so persuasive prose is not a thing it can emit |
+
+**Four ways a corpus is rejected at boot**, each a separate failure the loader
+names precisely so an operator can fix it from the message alone:
+
+| Condition | Why it must not boot |
+|---|---|
+| `unsigned` status | Nobody has attested to this encoding |
+| Signature mismatch | The body was edited after signing |
+| Structurally malformed | Nine checks, listed in §5.1 — unknown logic, the wrong parameter block, an undeclared input, a `20` where `0.20` was meant |
+
+Each names the file and the field, because the promise is that an operator fixes
+it from the message alone:
+
+```
+CORPUS REJECTED
+  bad.v1.yaml: does not match the rule schema:
+    logic: Input should be 'banded_percentage' or 'notice_period'
+```
+| **Empty corpus** | A service with no rules answers nothing. It would report healthy while being useless — usually a deleted file or a container build that skipped `rules/` |
 
 **G7 answers the brief's hardest requirement** — *"a qualified person must review
-and sign off the rule-matching logic before launch, not only individual filings."*
-It is a load-time failure, not a policy document. **It is also the demo's wow
-moment** ([DESIGN.md](DESIGN.md) §5.5).
+and sign off the rule-matching logic before launch."* A load-time failure, not a
+policy. It is also the demo's wow moment.
 
-**G4 is the human-in-the-loop enforcement.** The agent is never the officer.
+**G10 is the one that keeps us legal.** A model writing advocacy on a tenant's
+behalf is an unlicensed legal service. Removing the model from that path is the
+only reliable way to prevent it.
 
-### 6.1 Provenance-verifiability
+### 6.1 The G5 fallback — what the agent actually says when data is thin
 
-`GET /provenance/{rule_id}` renders the encoded logic beside the verbatim source
-clause with a link to the official document and the current signature, so **any**
-reader verifies an encoding in under a minute. Authority is replaced by public
-verifiability.
+A guardrail that has no voice script is a guardrail that breaks the call. When
+comparables fall below threshold, the agent must degrade gracefully rather than
+stall, and it must **never** quote a number it does not have.
 
----
-
-## 7. ElevenLabs Component Selection
-
-Box G is scored on **selection, not coverage.** Six chosen, three declined.
-
-| Component | Why this use case requires it |
-|---|---|
-| **Agent Workflows + sub-agents + per-node tool scoping** | The triage/verdict/action separation *is* G1 and G4. The Triage node physically cannot reach the filing tool |
-| **Scribe v2 Realtime + keyterm biasing** | "Ejari", "Makani", AED amounts across five accents. A misheard number is a wrong verdict |
-| **Eleven v3 TTS + multilingual** | Malayalam/Hindi/Urdu is the reason the answer does not reach people today (PS-5) |
-| **Webhook (server) tools** | The registry is external and deterministic. This seam keeps the LLM out of the computation |
-| **Knowledge base + source attribution** | Supplies the verbatim clause so the agent reports which document it used. It never produces the verdict |
-| **Agent Testing + post-call webhooks** | Stage 2 evidence, and the G9 audit trail |
-
-**Declined, with reasons:** *Voice Design* — the Voice Library suffices; a bespoke
-voice adds nothing to a rights line. *Batch calling* — outbound is **per-case and
-consent-gated (G8)**, never campaign-driven; unsolicited bulk calls about a
-person's legal position is a conduct risk we will not take. *MCP* — no
-tool-discovery requirement; four fixed webhook tools.
-
----
-
-## 8. Call Flow
-
-Mapped to the canonical Track 2 shape: **trigger → identify/consent → understand
-→ retrieve → act → confirm → follow up.**
-
-| Step | Node | What happens |
+| Contracts found | Engine returns | Agent behaviour |
 |---|---|---|
-| **Trigger** | 1 | Resident calls. Agent states it is an AI, provides information from published rules and not legal advice, and that the call is recorded. Language detected from the first utterance |
-| **Identify / consent** | 1 | Consent for a follow-up callback is requested and recorded (G8). Optional UAE Pass authorisation for the caller's own Ejari record |
-| **Understand** | 2–3 | Triage to a served domain and to answerable-vs-interpretive (G2). Per-domain slot-fill; every amount and date read back and confirmed (G3) |
-| **Retrieve** | 4 | Registry computes the verdict. Comparables drawn from the snapshotted contract data |
-| **Act** | 5–7 | Verdict rendered with the clause **cited aloud** (G1). Evidence pack assembled. Filing lodged to the officer review queue under two-key confirmation (G4) |
-| **Confirm** | 7 | Full readback of what was lodged, and what happens next |
-| **Follow up** | 8–9 | Statutory deadline registered; consented callback scheduled before the window closes and on status change |
+| ≥ 30 | `CLEAR`, confidence ≥ 0.9 | Normal flow |
+| 10–29 | `CLEAR_WITH_CONDITIONS`, reduced confidence | States the comparable **and its thinness** before the verdict |
+| < 10 | `HUMAN_REVIEW_REQUIRED` | **No number may be spoken or printed.** Offers the two recovery paths below |
 
-**The "you have no case" answer is the highest-value output for the buyer.** It is
-the deflection, and it proves we have not built a litigation funnel.
+**Below threshold, the agent says (English; equivalents authored per language):**
+
+> *"I can apply the rule, but I don't have enough registered contracts for a
+> property like yours in that area to give you a reliable market comparison — and
+> I won't quote you a percentage I can't stand behind.*
+>
+> *Two things I can still do. If you have your Ejari number, I can narrow it to
+> your exact building. Otherwise I can send you everything I do have — the rule,
+> the notice check, and what to ask for — and connect you to someone who can
+> review the comparison."*
+
+**Three properties make this work as a guardrail rather than a dead end:**
+
+1. It **names the limit** — thin data, not a system failure
+2. It **offers recovery** — the Ejari path, which usually resolves it
+3. It **still delivers the artifact** — the notice check is independent of market
+   data, so the caller is rarely left with nothing
+
+The notice-validity rule requiring no market data at all is why this degrades
+gracefully. **Below-threshold calls still produce a usable evidence pack**, which
+is a design consequence worth stating rather than a happy accident.
+
+### 6.2 Provenance-verifiability
+
+`GET /provenance/{rule_id}` renders encoded logic beside the verbatim source
+clause, with the official link and the current signature. Anyone verifies an
+encoding in under a minute. **Authority replaced by public verifiability.**
 
 ---
 
-## 9. Data Pipeline
+## 7. Call Flow
+
+Mapped to the canonical Track 2 shape.
+
+| Phase | Nodes | What happens |
+|---|---|---|
+| **Trigger** | 1 | Resident calls. Agent discloses it is an AI, gives information from published rules and not legal advice, and states the call is recorded. Language detected from the first utterance |
+| **Identify** | 4 | OTP over SMS/WhatsApp binds the session to the caller's number and signs the pack. No government identity system required |
+| **Understand** | 2–3 | Triage to domain and to answerable-vs-interpretive (G2). **Diagnosis, not form-filling** — the agent discovers which facts the rule needs. Every value read back and confirmed (G3) |
+| **Retrieve** | 5 | Rules API computes on snapshotted comparables. Returns state, verdict, citation, confidence |
+| **Act** | 6–8 | Result rendered with the clause **cited aloud** (G1). Evidence pack generated from templates (G10) and **dispatched to the caller's phone during the call** |
+| **Confirm** | 8 | Readback of what was sent and what it means |
+| **Follow up** | 9 | Statutory deadline armed under explicit opt-in (G8). SMS/WhatsApp primary; voice callback optional |
+
+**The highest-value output is "you don't have a case."** It is the deflection, and
+it proves this is not a litigation funnel.
+
+---
+
+## 8. Data Pipeline
 
 ```
 Dubai Pulse dld_rent_contracts-open   (OAuth API or bulk CSV)
@@ -343,69 +469,124 @@ Dubai Pulse dld_rent_contracts-open   (OAuth API or bulk CSV)
    + contract_count, confidence, snapshot_id, computed_at
         │
         ▼
-   market_average_rent → registry input
+   market_average_rent → Rules API
    input_sources.market_average_rent = "dld_open_rent_contracts_derived"
 ```
 
-**G5 thresholds:** fewer than 30 contracts in the window reduces confidence; fewer
-than 10 returns `insufficient_data`, and the agent must ask for the Ejari number
-rather than answer. **Snapshots are immutable and dated**, so any past answer is
-exactly reproducible.
+**G5 thresholds:** under 30 comparable contracts reduces confidence; under 10
+returns `HUMAN_REVIEW_REQUIRED` and no number may be spoken or printed.
+**Snapshots are immutable and dated**, so any past answer reproduces exactly.
 
 ---
 
-## 10. API Surface
+## 9. API Surface
 
-| Endpoint | Purpose | Guardrail |
-|---|---|---|
-| `POST /evaluate` | Run a rule | G1, G3 |
-| `GET /comparables` | Median rent + confidence for a comparable | G5 |
-| `GET /rules` | Loaded rules, versions, approval status | transparency |
-| `GET /provenance/{rule_id}` | Encoded logic ↔ verbatim source clause | §6.1 |
-| `POST /agent/triage` | Answerable vs. interpretive; distress | G2, G6 |
-| `POST /agent/confirm` | Issue a confirmation token after readback | G3 |
-| `POST /agent/consent` | Record callback consent or opt-out | G8 |
-| `POST /actions/evidence-pack` | Assemble the filing document | — |
-| `POST /actions/lodge` | Submit to the officer review queue | G4 |
-| `POST /actions/deadline` | Register a statutory deadline and callback | G8 |
-| `GET /healthz` | Liveness. **Fails if the corpus is unsigned** | G7 |
+Seven agent-facing webhook tools, plus public and dashboard routes. **Two are
+built** (T1.7); the rest are specified and land in later phases.
+
+| Endpoint | Purpose | Guardrail | Status |
+|---|---|---|---|
+| `POST /agent/triage` | Domain + answerable/interpretive + distress | G2, G6 | T3 |
+| `POST /agent/confirm` | Issue confirmation token after readback | G3 | T3 |
+| `POST /agent/otp/send` · `/verify` | Bind session to the caller's number | — | T3 |
+| `POST /evaluate` | Run a rule; returns state, verdict, citation | G1, G5, G9 · **G3 not yet enforced** | **built** |
+| `POST /evidence-pack` | Render the case report + factual response template | G10 | T2.4 |
+| `POST /dispatch` | Send the pack by SMS/WhatsApp | G9 | T3 |
+| `POST /deadline` | Arm a reminder; requires opt-in | G8 | T3 |
+| `GET /comparables` | Median rent + confidence | G5 | T2.3 |
+| `GET /rules` · `GET /provenance/{id}` | Public transparency | §6.2 | T2.6 |
+| `GET /officer/cases` | Mode B dashboard | G4 | T2.8 |
+| `GET /healthz` | Liveness. **Fails if the corpus is unsigned.** Lists every check performed and, in `not_yet_checked`, every one that is not | G7 | **built** |
+
+**What `/evaluate` enforces today.** G1 — a response cannot exist without a
+citation. G5 — thin evidence returns `HUMAN_REVIEW_REQUIRED` **with HTTP 200**,
+because it is an outcome and a 4xx would teach every client to treat honesty as a
+fault. G9 — the evaluation is appended to the hash-chained audit log before the
+response leaves, and every input must carry a recorded source or the request is
+refused.
+
+**G3 is specified but not enforced.** The confirmation token issued after spoken
+readback arrives with the agent endpoints in Phase 3. Until then `/evaluate`
+accepts unconfirmed values, and this table says so rather than implying a control
+that does not exist.
+
+**Status codes carry the ownership of a problem.** A caller who sent an unusable
+value gets 422 and can fix it. An unknown rule is 404 and names what is loaded. A
+rule that passed load-time validation and still cannot answer is **500**: the
+corpus is wrong, not the request, and reporting it as a 4xx would send a caller
+into retrying a corrected request forever against a defect only we can fix.
+
+---
+
+## 10. ElevenLabs Component Selection
+
+Scored on **selection, not coverage.** Eight chosen, eight declined. This list is
+the source of truth for Idea Canvas box J and must stay identical to it.
+
+| Component | Why this use case requires it |
+|---|---|
+| **Agents Platform** | The conversational runtime |
+| **Agent Workflows + per-node tool scoping** | The diagnose/compute/generate separation *is* G1 and G10. Triage physically cannot reach the evidence generator |
+| **Scribe v2 Realtime + keyterm biasing** | "Ejari", "Makani", Dubai area names, AED amounts across three accents. A misheard number is a wrong verdict |
+| **Eleven v3 TTS + multilingual** | Malayalam and Arabic are why the answer does not reach people today (PS-4) |
+| **Server / client tools** | The rules engine is external and deterministic. This seam keeps the LLM out of the computation |
+| **Telephony (Twilio / SIP)** | It is a phone line. Also carries the pack and the reminders by SMS |
+| **Agent Testing** | Multi-run pass rates and the adversarial suites — the Stage 2 evidence |
+| **Post-call webhooks** | Transcript and evaluation record to the audit store (G9) |
+
+**Declined, with reasons:**
+
+- **Knowledge base + RAG** — *each signed rule file carries its own `verbatim`
+  clause, so the citation is already deterministic.* Retrieval would add
+  uncertainty to the one thing that must never be uncertain.
+- **Voice Design** — the Voice Library suffices; a bespoke voice adds nothing to
+  a rights line.
+- **Batch calling** — reminders are **per-case and opt-in (G8)**. Bulk outbound
+  about a person's legal position is a conduct risk we will not take, and no such
+  code path exists.
+- **MCP servers** — no tool-discovery requirement; seven fixed webhook tools.
+- **Sub-agents** — one domain in v1, so there is nothing to delegate to.
+- **WhatsApp**, **Web/mobile SDKs**, **Bring-your-own LLM** — not required by the
+  v1 flow.
 
 ---
 
 ## 11. Testing Strategy
 
-**Layer 1 — rule logic (pytest).** Every band boundary, both sides. Every gratuity
-tier including the two-year cap and the sub-one-year case. Notice period at 89, 90
-and 91 days. Pure functions; coverage should be total.
+**Layer 1 — rule logic.** Every band boundary on both sides. Notice period at 89,
+90, 91 days. Pure functions; coverage should be total.
 
-**Layer 2 — registry integrity (pytest).** Unsigned rule refuses to load. Tampered
-body fails verification. An expired `effective_to` is not selected.
+**Layer 2 — registry integrity.** Unsigned rule refuses to load. Tampered body
+fails verification. Expired `effective_to` is not selected.
 
-**Layer 3 — API contract (pytest + TestClient).** `/evaluate` and `/actions/lodge`
-reject a missing confirmation token. A null citation is never returned alongside a
-verdict. An outbound callback cannot be scheduled without a consent token.
+**Layer 3 — API and generator contract.** `/evaluate` rejects a missing
+confirmation token. A null citation never accompanies a verdict. Thin comparables
+force `HUMAN_REVIEW_REQUIRED`. **The evidence generator rejects any input that is
+not a structured evaluation record** (G10). No route reaches a terminal case
+status (G4).
 
 **Layer 4 — agent behaviour (ElevenLabs Agent Testing).** Multi-run pass rates on
 the primary flow, plus adversarial suites:
 
-- callers requesting legal advice or outcome prediction → must escalate
-- callers giving contradictory numbers → must re-confirm
-- callers switching language mid-call
-- callers in distress → must transfer (G6)
-- callers opting out → session ends, suppression recorded (G8)
-- **tool-call test proving the filing tool refuses without a confirmation token**
+- callers requesting advice or outcome prediction → must escalate
+- contradictory numbers → must re-confirm
+- mid-call language switch
+- distress → must transfer (G6)
+- opt-out → suppression recorded, irreversible (G8)
+- **tool-call test proving the evidence generator refuses without a confirmation
+  token, and the tamper test proving the service refuses to boot**
 
-That last one is the highest-value single test in the project. **A judge remembers
-a negative test.**
+**A judge remembers a negative test.**
 
 ---
 
 ## 12. Deployment
 
-Single container: FastAPI serving the API, the static web checker and the
-provenance pages. DuckDB baked in at build time (read-only). Agent webhooks point
-at the same host. One public deployment serves as the Box N working link from
-23 September.
+Single container: FastAPI serving the API, web checker, provenance pages and
+officer dashboard. DuckDB baked in read-only at build time. SQLite volume for
+cases. Twilio webhooks point at the same host. Runs under $20/month.
+
+One public deployment serves as the Box N working link from 23 September.
 
 ---
 
@@ -414,8 +595,8 @@ at the same host. One public deployment serves as the Box N working link from
 | Required 14 October | Source |
 |---|---|
 | Live callable agent / hosted deployment | §12 |
-| Recorded demo + failure paths | [DESIGN.md](DESIGN.md) §5.4 |
+| Recorded demo + failure paths | [DESIGN.md](DESIGN.md) §6.2 |
 | Agent Testing suite and pass rates | §11 Layer 4 |
 | Transcripts and post-call analysis | G9 post-call webhooks |
-| One-page architecture diagram | §2 |
-| Short technical README | This document, condensed to `README.md` |
+| One-page architecture diagram | §2 + §3 |
+| Short technical README | This document, condensed |

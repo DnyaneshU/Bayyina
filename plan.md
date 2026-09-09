@@ -4,135 +4,461 @@
 > (recommended) or superpowers:executing-plans to implement this plan task-by-task.
 > Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** A multilingual voice agent and public web checker that answer Dubai
-rent-increase, notice-validity and end-of-service questions from a signed,
-versioned rules registry, with the governing clause cited aloud.
+**Goal:** Ship a working product that a Dubai resident can call today — which
+checks a rent increase against published rules, explains the answer in their
+language, and puts an evidence pack in their hand before the call ends.
 
-**Architecture:** Determinism at the core, language only at the edge. A Python
-rules registry computes every verdict as a pure function and returns a structured
-result with a citation; the ElevenLabs agent triages, slot-fills and speaks, but
-never computes. Market comparables come from 4.2M registered Ejari contracts in
-DuckDB. Guardrails are schema contracts and load-time checks, never prompt text.
+**Architecture:** Determinism at the core, language only at the edge. A signed
+rules registry computes every verdict; the ElevenLabs agent diagnoses, speaks and
+never computes. All market data is open. **No government permission is required
+for any part of the product to work.**
 
-**Tech Stack:** Python 3.11+, FastAPI, Pydantic v2, DuckDB, pytest, Jinja2,
-ElevenLabs Agents (Workflows, Scribe v2, Eleven v3), Twilio.
+**Tech Stack:** Python 3.11+, FastAPI, Pydantic v2, DuckDB, SQLite, Jinja2,
+WeasyPrint, pytest, ElevenLabs Agents, Twilio.
 
-**Spec:** [docs/DESIGN.md](docs/DESIGN.md) (what and why) and
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (how). Executors read both.
+**Spec:** [docs/DESIGN.md](docs/DESIGN.md) · [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+· [docs/CANVAS.md](docs/CANVAS.md). Executors read DESIGN and ARCHITECTURE before
+starting.
+
+**The one sentence this plan serves:**
+
+> Bayyina converts published tenancy rules into a safe, conversational workflow
+> that determines what can be determined, produces the evidence a person needs to
+> act, and stops whenever the facts require human judgement.
 
 ---
 
 ## Global Constraints
 
-Every task's requirements implicitly include this section.
+Every task's requirements implicitly include this section. A task that violates
+one of these is wrong even if its tests pass.
 
-- **The LLM never computes a verdict.** Any task that puts arithmetic or rule
-  interpretation into a prompt is wrong by construction.
-- **The agent acts but never decides.** It assembles, lodges, tracks and follows
-  up. No code path may set a case to `approved`, `rejected` or `amended` — those
-  belong to a human officer. A task that adds one is wrong by construction.
+### Correctness
+
+- **The LLM never computes a verdict.** Arithmetic or rule interpretation in a
+  prompt is wrong by construction.
 - **No verdict without a citation.** Every evaluator return carries a non-null
   `citation`, or it is not a verdict.
-- **No outbound call without recorded consent**, and an opt-out is irreversible.
-- **Rule signature statuses:** `unsigned` → the loader raises and the service does
-  not boot. `provisional` → loads, and every response carries
-  `review_status: "provisional"` which the agent must disclose aloud.
-  `certified` → requires a qualified reviewer. **We are `provisional` until a
-  reviewer is appointed, and we say so.**
-- **Money is `Decimal`, never `float`.** Rates and gaps may be float.
-- **Dates are `datetime.date`, never strings, past the API boundary.**
-- **Every evaluation writes an immutable record.** Records are append-only.
-- **Languages v1:** English, Arabic (Gulf), Malayalam, Hindi, Urdu.
-- **Commit after every task.** Small, frequent, message prefixed `feat:`/`test:`/`docs:`.
-- **Python 3.11+**, `pytest` for all tests, `ruff` for lint.
+- **The agent never submits to an authority.** Mode C has no concrete
+  implementation. No agent-reachable case status may be terminal.
+- **The evidence generator has no LLM in its call path.** It accepts structured
+  evaluation records and renders templates. Nothing else.
+- **Money is `Decimal`.** Rates and gaps may be `float`. Dates are `datetime.date`
+  past the API boundary.
+- **Rule statuses:** `unsigned` → service refuses to boot. `provisional` → loads,
+  and the agent discloses it aloud. `certified` → requires a qualified reviewer.
+  **We are `provisional` and we say so.**
 
----
+### Non-functional — these are budgets, not aspirations
 
-## Phase Map
-
-| Phase | Window | Outcome |
+| Budget | Target | Why |
 |---|---|---|
-| **0** | Now → 10 Sep | Unblock: template, word limits, organiser questions, reviewer hunt |
-| **1** | Now → 23 Sep | Registry + comparables + web checker **deployed**, canvas submitted |
-| **2** | 23 → 30 Sep | Agent skeleton and test suites written *before* the sprint starts |
-| **3** | 30 Sep → 14 Oct | Build sprint: full agent, all guardrails, demo recording |
-| **4** | 14 → 26 Oct | Harden, rehearse, pursue pilot conversation |
+| **Our webhook latency** | **< 150 ms p95** | Voice quality and latency is 20% of Stage 2. Total first-audio target is < 1.5 s; STT, LLM and TTS consume the rest. **This forbids runtime aggregation over the contract dataset** |
+| Rule evaluation | < 5 ms | Pure functions, corpus in memory at boot |
+| Comparable lookup | < 20 ms | Pre-aggregated table, indexed. Never a `GROUP BY` over 9.8M rows at call time |
+| Evidence pack render | < 2 s | Runs after the verdict is spoken, so it is off the critical path |
+| Cost per completed call | < $0.50 all-in | Measured in T4.6, not assumed |
+| Hosting | < $20 / month | Single container |
 
-**Phase 1 is the one that must not slip.** Box N scores zero without a live link.
+### Customer experience — non-negotiable
+
+- **Answer first, reasoning second.** "The increase is not permitted" precedes
+  "because your rent sits 5.9% below market."
+- **Four conversational turns maximum** to collect seven slots. Every extra turn
+  is an abandonment opportunity.
+- **One batched readback**, not seven confirmations.
+- **The pack is in the call's language.** An English PDF for a Malayalam caller is
+  a failed delivery.
+- **Friction proportional to risk.** No verification step exists unless it
+  prevents a real harm.
+- **Abandonment is tracked from the first deployed call**, not added later.
+
+### Process
+
+- **Every task ends with a Definition of Done that is checkable by someone else.**
+- Tests before implementation. `ruff` clean. Small commits.
+- **Do not commit unless explicitly asked.** Leave the tree dirty for review.
 
 ---
 
-# PHASE 0 · Unblock
+## Engineering Standards
 
-### Task 0: Resolve external unknowns
+Cross-cutting requirements. They are not tasks; they are conditions every task
+must satisfy, and a reviewer may reject work that ignores them.
 
-No code. These gate later decisions and every one is a same-day action.
+### Backend
 
-- [ ] **Step 1: Download the official Idea Canvas template**
+| Standard | Requirement | Why it matters here |
+|---|---|---|
+| **Failure is a first-class path** | Every agent-facing tool defines its timeout, its retry policy, and **what the agent says when it fails**. No tool may fail silently | A webhook that hangs during a live call produces dead air. The caller hangs up and never returns |
+| **Idempotency** | `/evidence-pack`, `/dispatch` and `/deadline` accept an `Idempotency-Key` and return the prior result on replay | Voice platforms retry on network blips. A retry must not send two SMS or bill twice |
+| **Timeouts everywhere** | Every outbound call (Twilio, DB) has an explicit timeout. No unbounded waits | One slow dependency must not consume the 150 ms budget |
+| **SQLite in WAL mode** | `PRAGMA journal_mode=WAL`, busy timeout set | Default SQLite locks under concurrent writes. Concurrent calls are the normal case |
+| **Secrets never in git** | All credentials via environment; `settings.py` reads them; `.env.example` documents them with dummy values | Twilio and ElevenLabs keys leaking is an incident, not a bug |
+| **Structured logging with a correlation id** | One `call_id` threads greeting → evaluations → pack → dispatch → reminder. JSON lines | Post-call analysis is a Stage 2 deliverable. It is impossible to reconstruct without this |
+| **Public endpoints are rate-limited** | The web checker is unauthenticated and hits the database | An open endpoint over public data is an abuse vector |
+| **Health checks are deep** | `/healthz` verifies corpus signature, DuckDB readable, aggregate table present, snapshot age within bounds | A green health check that lies is worse than none |
+| **Schema migrations exist from day one** | Even for SQLite. Numbered, forward-only | "We will add migrations later" means data loss later |
 
-From the challenge page ("Download the Template Idea Canvas Submission Document").
-Record the **exact word limit for each of the 14 boxes** into the status-tracker
-table in `docs/CANVAS.md`, replacing every *from template* placeholder.
+### Frontend
 
-- [ ] **Step 2: Post the Demo Day question on the challenge Discussion tab**
+| Standard | Requirement |
+|---|---|
+| **Mobile-first at 360 px** | Designed at 360 px, then widened. **Not** desktop-tolerated-on-mobile — the audience is phone-first |
+| **RTL is layout, not fonts** | Arabic sets `dir="rtl"` and mirrors the whole layout. Test it; do not assume a font swap suffices |
+| **Every async action has three states** | Idle, loading, error. A silent failure on a rights check is a broken promise |
+| **Validate before the round trip** | Never make the user wait for a 422 they could have been told about instantly |
+| **`HUMAN_REVIEW_REQUIRED` is a designed state** | It is a legitimate outcome with its own layout and next steps — never an error page or an empty result |
+| **Contrast and tap targets** | WCAG AA contrast; 44 px minimum targets. This audience includes older and low-literacy users |
+| **No build step** | Static HTML/CSS/JS served by the same container. Toolchain complexity buys nothing at this scale |
 
-Ask: *"Is remote participation available for finalists at Demo Day on 26–27
-October?"* The team cannot travel. The answer shapes Phase 4. Asking early also
-puts the team name in front of the organisers.
+### Content and documentation
 
-- [ ] **Step 3: Search the Ignyte mentor directory for a legal or regtech advisor**
+| Standard | Requirement |
+|---|---|
+| **One glossary, three languages** | Every rule term, state name and UI label is defined once and reused across voice scripts, PDF templates, web copy and docs |
+| **Translation is reviewed by a speaker** | Machine-translated legal-adjacent copy is a liability. Arabic and Malayalam get human review |
+| **The provenance page is a documented product feature** | It is written, not merely rendered |
+| **Decisions are recorded** | `docs/DECISIONS.md` — one line per material choice, with the date and the reason |
 
-550+ mentors are available on the platform today. A one-off advisory review is
-enough to move rule status from `provisional` to `certified` and to name a
-reviewer in box K. Budget one hour.
+---
 
-- [ ] **Step 4: Register for Dubai Pulse and request the rent contracts dataset**
+## The Customer Journey
 
-`dld_rent_contracts-open`. API key and secret arrive in two separate emails.
-**Do this first — access is not instant, and Task 11 blocks on it.** Download the
-bulk CSV in parallel as a fallback so Task 11 is never blocked on OAuth onboarding.
+This precedes the task list deliberately. Everything below is built to serve it,
+and any task that degrades it is wrong.
 
-- [ ] **Step 5: Verify the box D baseline figures**
+| Stage | What the resident experiences | What must be true | Failure mode we design against |
+|---|---|---|---|
+| **Discovery** | Finds the web checker or the number | The web checker works standalone and answers the same question | An unusable product behind a phone number nobody has |
+| **First 15 seconds** | Greeting, AI disclosure, recording notice | Disclosure is **≤ 8 seconds spoken**, complete, and in their language | Thirty seconds of legalese loses the caller before the value lands |
+| **Language** | Speaks; is answered in kind | Auto-detect on the first utterance, plus an explicit recovery line offering the three languages | Wrong-language detection strands the caller silently |
+| **Diagnosis** | Is asked ~4 questions, conversationally | Slots grouped naturally: *"What are you paying now, and what are they asking for?"* | Seven sequential questions reads as a form and loses people |
+| **Confirmation** | Hears everything read back once | One batched readback, then confirm | Seven confirmations doubles call length |
+| **The answer** | Hears the verdict, then why | **Answer first.** Clause cited after | Burying the answer under reasoning |
+| **Thin data** | Told plainly that the comparison is unreliable | Names the limit, offers the Ejari path, **still delivers the notice check** | A dead end that leaves the caller with nothing |
+| **The artifact** | Receives an SMS with the pack, on the call | Pack in their language. Delivery to the calling number needs no OTP — **being on the call proves control of it** | Verification friction that costs more than it protects |
+| **After** | Reminder before the statutory deadline | Explicit opt-in, easy opt-out | Contact they did not ask for |
+| **Escalation** | Told clearly a human is needed and why | Never a silent dead end | "I can't help with that." Full stop. |
 
-Every ⚠ row in `docs/CANVAS.md` box D. Where a figure cannot be sourced, rewrite
-it as an explicit hypothesis to be measured. **Do not invent numbers** — boxes D
-and J are cross-checked.
+### The two moments that decide whether this product is used
 
-- [ ] **Step 6: Commit**
+1. **Seconds 0–15.** Compliance disclosure and customer retention pull in opposite
+   directions here. Resolve it by compressing the spoken disclosure to its legally
+   necessary core and putting the full text in the pack — *not* by shortening what
+   we disclose.
+2. **The SMS arriving while still on the call.** This is the moment the product
+   stops being a conversation and becomes a thing they own. If the pack arrives
+   after the call, the moment is lost.
 
-```bash
-git add docs/CANVAS.md
-git commit -m "docs: record canvas word limits and sourced baselines"
+---
+
+## Delivery Strategy — walking skeleton first
+
+**We do not build the registry, then the data, then the API, then the frontend.**
+That sequence discovers integration problems last, when they are most expensive.
+
+Instead: **Phase 1 ships a thin end-to-end slice to a public URL within days** —
+one signed rule, a manually supplied comparable, a plain web form, a real verdict.
+It is deployed and reachable. That single decision:
+
+- satisfies **Box N** (a working link, which scores zero without one) early
+- proves deploy, config and boot-time guardrails before they can block anything
+- gives every later phase somewhere to land instead of a big-bang integration
+
+Then each layer thickens against a running system.
+
+```
+Phase 1  ▓░░░░░  thin slice, deployed          → Box N safe
+Phase 2  ▓▓▓░░░  real data, real artifact      → the product exists
+Phase 3  ▓▓▓▓▓░  voice                          → the competition build
+Phase 4  ▓▓▓▓▓▓  evidence, demo, hardening      → Stage 2 submission
 ```
 
+## Workstreams
+
+Four tracks run in parallel. **Only Track A is the critical path** — the others
+are sized to finish before they are needed, and none of them can block a deploy.
+
+| Track | Owns | Depends on | Idle risk |
+|---|---|---|---|
+| **A · Core** | Registry, rule logic, evaluator, API, deploy | Nothing | **This is the critical path.** Protect it |
+| **B · Data** | Dubai Pulse ingest, validation, aggregation, comparables | T0.3 credentials only | Blocked until credentials land — start the bulk CSV immediately |
+| **C · Surface** | Design system, web checker, provenance pages, evidence templates, PDF | A's `/evaluate` contract (fixed at T1.7) | Can begin on the contract before the implementation exists |
+| **D · Submission** | Canvas, baselines, organiser questions, glossary, README | Nothing | **Fully independent. Start it on day one and never let it become a week-three panic** |
+
+**Interface freeze:** the `/evaluate` request and response shapes are fixed at
+T1.7 and must not change afterwards without telling Track C. That single agreement
+is what lets frontend and backend proceed without waiting on each other.
+
+### Sequencing rules
+
+1. **Track A never waits.** If B, C or D block, A continues.
+2. **Ship Phase 1 before starting Phase 2.** A deployed thin slice beats an
+   undeployed thick one.
+3. **Track D has its own deadline chain** ending 21 September, two days before the
+   canvas closes. The canvas is not a side-effect of engineering; it is the
+   Stage 1 deliverable.
+4. **A blocked customer gate stops the phase.** T2.8 failing is not a
+   nice-to-have — it is a stop.
+
+### Calendar
+
+Today is **9 September 2026**. Stage 1 closes **23 September** — 14 days.
+
+| Phase | Window | Gate to pass |
+|---|---|---|
+| **0** | 9–11 Sep | Unblocked; scripts and glossary written |
+| **1** | 11–15 Sep | **Public URL live.** Box N satisfied |
+| **2** | 15–21 Sep | Real comparables, evidence pack, provenance, comprehension passed |
+| **Canvas** | 21–23 Sep | **Submit** |
+| **3a** | 23–30 Sep | Voice skeleton on the free tier while awaiting the shortlist |
+| **3b** | 30 Sep–10 Oct | Full agent, three languages, all guardrails |
+| **4** | 10–14 Oct | Test evidence, demo recording, README. **Submit** |
+| **Harden** | 14–26 Oct | Latency, pilot outreach, rehearsal |
+
+### Stage gates — pass or do not proceed
+
+| Gate | Date | Criterion | If it fails |
+|---|---|---|---|
+| **G-A · Deployed** | 15 Sep | Public URL returns a correct verdict; `/healthz` green | Stop all Phase 2 work. Nothing matters more than this |
+| **G-B · Canvas** | 21 Sep | All 14 boxes within word limits; D↔J consistent; N has a link | Submit what exists. A submitted imperfect canvas beats a perfect unsubmitted one |
+| **G-C · Comprehension** | 20 Sep | Two non-English readers state verdict and next step unaided | **Blocking.** Fix templates before any voice work |
+| **G-D · Latency** | 8 Oct | p95 first audio < 1.5 s | Cut scope, not the budget. Latency is 20% of Stage 2 |
+| **G-E · Demo** | 13 Oct | Recording runs end to end plus three failure paths, unedited | Re-record. This is the pitch if we cannot travel |
+
+### If we are not shortlisted on 30 September
+
+**The product still ships.** Mode A depends on nothing the competition provides.
+Phase 3 continues on the free tier at reduced scope, and Track D pivots from canvas
+to launch. This is stated so the decision is already made rather than debated on
+the day.
+
 ---
 
-# PHASE 1 · Registry, Data, Web Checker
+## File Structure
 
-## Task 1: Project scaffold
+```
+IgNyte/
+├── plan.md · README.md
+├── docs/            DESIGN · ARCHITECTURE · GLOSSARY · DECISIONS · CANVAS
+├── agent/           scripts/{en,ar,ml}/ · workflows/ · tests/
+│
+├── backend/         PYTHON — the rules engine and API
+│   ├── pyproject.toml · .env.example
+│   ├── rules/       THE CORPUS — signed, versioned YAML
+│   ├── scripts/     sign_rule · verify_corpus · explore
+│   ├── src/bayyina/
+│   │   ├── registry/    schema · signing · loader · evaluator
+│   │   ├── rules_logic/ banded_percentage · notice_period
+│   │   ├── market/      ingest · aggregate · comparables
+│   │   ├── evidence/    pack · render · templates/{en,ar,ml}/
+│   │   ├── guardrails/  triage · tokens · consent
+│   │   ├── store/       db · migrations · cases · consent · deadlines
+│   │   ├── audit.py · settings.py · observability.py
+│   │   └── api/         app · routes_{evaluate,agent,evidence,provenance}
+│   ├── tests/       mirrors src/
+│   └── data/        parquet + duckdb (gitignored)
+│
+└── frontend/        VITE + REACT + TYPESCRIPT
+    ├── package.json · vite.config.ts · tsconfig*.json
+    └── src/
+        ├── api/     typed client
+        ├── i18n/    locales/{en,ar,ml}.json
+        ├── test/    setup
+        └── components/
+```
 
-**Files:**
-- Create: `pyproject.toml`, `src/bayyina/__init__.py`, `tests/__init__.py`, `.gitignore`
-- Test: `tests/test_scaffold.py`
+**Two toolchains, one deployment.** `frontend/` builds to static assets that
+`backend/` serves in production, so the split costs nothing at deploy time. In
+development the Vite dev server proxies `/api` to the backend, so **there is no
+CORS configuration to maintain in either environment**.
 
-**Interfaces:**
-- Produces: the `bayyina` package importable from `src/`.
+**Principle:** files that change together live together. `registry/` changes when
+the rule model changes; `rules_logic/` when a rule type is added; `evidence/` when
+the document changes. Independent, therefore separate.
 
-- [ ] **Step 1: Write the failing test**
+---
+
+# PHASE 0 · Foundations
+
+No code. Every item unblocks something later, and T0.6 gates all voice work.
+
+## T0.1 — Canvas template and word limits
+
+- [x] Download the official ElevenLabs Idea Canvas template
+- [x] Record the **exact word limit for each of the 14 boxes** into the status
+      tracker in `docs/CANVAS.md`, replacing every *from template* placeholder
+- [x] Count the current draft of each box and record it beside the limit
+
+**DoD:** No `*from template*` string remains in `docs/CANVAS.md`, and every box
+shows `current / limit`.
+
+## T0.2 — Organiser questions
+
+- [ ] **STILL OPEN** — post on the Discussion tab: *"Is remote participation available
+      for finalists at Demo Day on 26–27 October?"*
+- [x] ~~Ask whether boxes accept tables~~ — **answered by the template itself**: D, F, I, J, K, M, N and P are printed as tables. (was: boxes D, I and J are
+      currently drafted as tables)
+
+**DoD:** Both posted. The second matters — if tables are disallowed, boxes D, I
+and J need reformatting, and finding that out on 22 September is a crisis.
+
+## T0.3 — Dubai Pulse access
+
+- [x] Register at `dubaipulse.gov.ae`; request `dld_rent_contracts-open`
+- [x] **In parallel, download the bulk CSV** — never block T2.1 on OAuth onboarding
+- [x] Record dataset row count, column names and date range in `docs/CANVAS.md` box D
+
+**DoD:** A local CSV exists and its schema is documented. Do this on day one;
+credential turnaround is not instant.
+
+## T0.4 — Baseline verification
+
+- [x] Verify the RDC filing fee against the DLD published schedule
+- [x] Verify DLD service standards for time-to-answer
+- [x] Attempt RDC annual case volume and bounce rate from DLD annual reports
+- [x] Move anything found into box D **Verified**; leave the rest as declared
+      hypotheses with a measurement route
+
+**DoD:** At least **two** additional rows move from hypothesis to verified.
+Sourcing these is worth more than any feature.
+
+## T0.5 — Legal reviewer outreach
+
+- [ ] Search the Ignyte mentor directory (550+ mentors) for legal or regtech advisors
+- [ ] Request a one-off advisory review of two rule encodings
+- [ ] If accepted, plan for `certified`; if not, `provisional` stands and is disclosed
+
+**DoD:** At least three approaches made and logged.
+
+## T0.6 — Customer journey and conversation scripts ⚠ GATES ALL VOICE WORK
+
+The scripts are a **deliverable**, not improvisation at build time.
+
+- [x] Write `agent/scripts/en/` covering: greeting and disclosure (**≤ 8 seconds
+      spoken — read it aloud with a timer**), language recovery, the four
+      diagnosis turns, the batched readback, answer-first verdict delivery for
+      each of the three states, the G5 thin-data script
+      ([ARCHITECTURE.md](docs/ARCHITECTURE.md) §6.1), the G2 interpretive
+      escalation, the G6 distress handoff, pack dispatch, and deadline opt-in
+- [x] Map the seven rent slots into **four** conversational turns
+- [x] Read every script aloud and time it. Anything over budget gets cut
+
+**DoD:** A reviewer who has never seen the project can read the script set and
+run the whole call by hand. Every turn has a purpose and a time cost.
+
+## T0.7 — Budgets, written down
+
+- [x] Record the latency budget table in `README.md` as a stated commitment
+- [x] Instrument targets: which spans get timed, which percentile is reported
+
+**DoD:** The budgets exist as a document a reviewer can hold us to.
+
+## T0.8 — Glossary and content style guide ⚠ GATES ALL COPY · Track D
+
+Three languages, legal-adjacent copy, four surfaces (voice, PDF, web, docs).
+**Without one source of truth for terminology, they will drift** — and drift in a
+compliance product reads as carelessness.
+
+- [x] Create `docs/GLOSSARY.md` defining, in English, Arabic and Malayalam:
+      every rule term (permitted increase, market average, notice period,
+      shortfall), the three states (CLEAR / CLEAR WITH CONDITIONS / HUMAN REVIEW
+      REQUIRED), and the standing disclosures (AI identity, recording, not legal
+      advice, provisional review status)
+- [x] Fix the register: plain language, short sentences, **no legal jargon we do
+      not define on the spot**
+- [x] Rule: **the same concept uses the same word everywhere.** Not "verdict" in
+      the API, "result" in the PDF and "answer" on the web
+
+**DoD:** Every user-visible string in the project can be traced to a glossary
+entry. A translator can work from this file alone.
+
+## T0.9 — Secrets, environments and the decision log · Track A
+
+- [x] `.env.example` documenting every variable with dummy values — Twilio SID and
+      token, ElevenLabs key, base URL, environment name
+- [x] Confirm `.gitignore` covers `.env`, `data/raw/`, `*.duckdb`
+- [x] Define two environments: `local` and `production`. No staging — it would add
+      ceremony without adding safety at this size
+- [x] Create `docs/DECISIONS.md` and seed it with the decisions already made:
+      Mode C unimplemented; gratuity deferred; OTP only for a different number;
+      pre-aggregated comparables for latency; `provisional` rule status
+
+**DoD:** A new engineer can run the project from `.env.example` alone, and can
+read why the five load-bearing decisions were made without asking.
+
+## T0.10 — Primary research for Boxes F and G 🔴 **STAGE 1 CRITICAL PATH**
+
+**Added 2026-09-09** after the real canvas template arrived. The brief described
+14 boxes; the template has 17, and **Box F requires named, verifiable
+conversations with people inside the institution type.** It was not in this plan
+because we did not know it existed.
+
+> *"We may contact them. Desk research alone scores in the bottom band."*
+> *"If nothing changed, you have not spoken to enough people."*
+
+Boxes F and G sit inside the **25% problem-fit** criterion. They cannot be
+fabricated and they cannot be built by an engineer. **This is now the single
+highest-value task in the project**, above all code.
+
+- [ ] Search the Ignyte mentor directory in this order: **PropTech founders**
+      (they have hit the DLD data wall and can speak to both the problem and the
+      data), property and facilities management (**they issue the notices**),
+      anyone with DLD/RERA/government background, then legal and compliance
+- [ ] **Message six to eight people.** Cold response rates are low; three
+      conversations are needed
+- [ ] Run each as **20 minutes of listening, not pitching.** Five questions:
+      where does it go wrong first · how much of what reaches you could have been
+      settled by checking the index · when a case arrives incomplete what is
+      missing · what do you wish tenants knew · what would stop you using this
+- [ ] **Ask permission to name them** — Ignyte may contact them
+- [ ] Record name, role, organisation type, date, and **the one thing they said
+      that changed the idea** directly into `docs/CANVAS.md` box F
+- [ ] Write box G **only after**: the assumption that turned out false, and what
+      changed. **Do not fabricate this box** — it exists to catch teams who
+      skipped the research
+
+**DoD:** Three named conversations in box F with dates, and a box G that names a
+real assumption we abandoned. **Target 18 September**, five days before close.
+
+**Note:** T0.5 (legal reviewer) uses the same directory and the same outreach.
+One effort serves both.
+
+---
+
+# PHASE 1 · Walking Skeleton → deployed
+
+**Goal: a public URL that computes a real verdict from a signed rule.** Ship it
+before adding depth.
+
+## T1.1 — Scaffold, settings, CI
+
+**Files:** `pyproject.toml`, `src/bayyina/__init__.py`, `src/bayyina/settings.py`,
+`.github/workflows/ci.yml`, `.gitignore`
+**Test:** `tests/test_scaffold.py`
+
+- [x] **Write the failing test**
 
 ```python
 # tests/test_scaffold.py
 def test_package_imports():
     import bayyina
+
     assert bayyina.__version__
+
+
+def test_settings_have_required_paths(tmp_path):
+    from bayyina.settings import Settings
+
+    s = Settings(rules_dir=tmp_path, data_dir=tmp_path)
+    assert s.rules_dir == tmp_path
 ```
 
-- [ ] **Step 2: Run it and confirm it fails**
+- [x] **Run it, confirm failure:** `pytest tests/test_scaffold.py -v` →
+      `ModuleNotFoundError: No module named 'bayyina'`
 
-Run: `pytest tests/test_scaffold.py -v`
-Expected: FAIL — `ModuleNotFoundError: No module named 'bayyina'`
-
-- [ ] **Step 3: Create the package**
+- [x] **Create the package**
 
 ```toml
 # pyproject.toml
@@ -141,17 +467,13 @@ name = "bayyina"
 version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = [
-  "pydantic>=2.7",
-  "fastapi>=0.111",
-  "uvicorn[standard]>=0.30",
-  "pyyaml>=6.0",
-  "duckdb>=1.0",
-  "jinja2>=3.1",
-  "httpx>=0.27",
+  "pydantic>=2.7", "pydantic-settings>=2.3", "fastapi>=0.111",
+  "uvicorn[standard]>=0.30", "pyyaml>=6.0", "duckdb>=1.0",
+  "jinja2>=3.1", "httpx>=0.27",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "ruff>=0.5"]
+dev = ["pytest>=8.0", "pytest-cov>=5.0", "ruff>=0.5"]
 
 [build-system]
 requires = ["setuptools>=68"]
@@ -163,48 +485,55 @@ where = ["src"]
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
 ```
 
 ```python
-# src/bayyina/__init__.py
-__version__ = "0.1.0"
+# src/bayyina/settings.py
+from pathlib import Path
+from pydantic_settings import BaseSettings
+
+
+class Settings(BaseSettings):
+    rules_dir: Path = Path("rules")
+    data_dir: Path = Path("data")
+    market_snapshot_max_age_days: int = 120
+    min_contracts_for_answer: int = 10
+    min_contracts_for_full_confidence: int = 30
 ```
 
-```gitignore
-__pycache__/
-*.pyc
-.venv/
-data/*.duckdb
-data/raw/
-.env
-```
+> **Note added at T1.4.** An early draft of this block carried
+> `notice_required_days: int = 90`. It was removed: the 90 days are a property of
+> Law 26/2007 Article 14, not an operational choice, and holding a rule parameter
+> in configuration would let an operator change the law by editing an environment
+> variable while the rule signature still verified (D-027). Rule parameters live
+> in the signed rule file. G5 thresholds stay here, because they are our choices
+> about when we decline to answer.
 
-- [ ] **Step 4: Install and confirm the test passes**
+- [x] **Run, confirm pass:** `pytest -v` → 2 passed
+- [x] **Add CI** running `ruff check .` and `pytest` on every push
 
-Run: `pip install -e ".[dev]" && pytest tests/test_scaffold.py -v`
-Expected: PASS
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add pyproject.toml src tests .gitignore
-git commit -m "feat: project scaffold"
-```
+**DoD:** CI green on a clean checkout. `pip install -e ".[dev]"` works from zero.
 
 ---
 
-## Task 2: Rule schema
+## T1.2 — Rule schema, signing, loader (G7)
 
-**Files:**
-- Create: `src/bayyina/registry/__init__.py`, `src/bayyina/registry/schema.py`
-- Test: `tests/registry/test_schema.py`
+**Files:** `src/bayyina/registry/{schema,signing,loader}.py`, `scripts/sign_rule.py`,
+`scripts/verify_corpus.py`
+**Test:** `tests/registry/test_{schema,signing,loader}.py`
 
-**Interfaces:**
-- Produces: `Rule`, `RuleSource`, `RuleApproval`, `Band`, `ApprovalStatus`.
-  `Rule.body_for_signing() -> dict` returns the rule minus its approval block —
-  this is what Task 3 hashes.
+**Interfaces produced:**
+- `Rule`, `RuleSource`, `RuleApproval`, `Band`, `ApprovalStatus`
+- `Rule.body_for_signing() -> dict` — the rule minus its approval block
+- `rule_digest(rule) -> str` returning `"sha256:<hex>"`; `verify_signature(rule) -> bool`
+- `load_rules(directory) -> dict[str, Rule]`; `UnsignedRuleError`, `TamperedRuleError`
 
-- [ ] **Step 1: Write the failing test**
+**This is the moat and the wow moment. Build it first and build it properly.**
+
+- [x] **Write the failing tests**
 
 ```python
 # tests/registry/test_schema.py
@@ -222,7 +551,7 @@ MINIMAL = {
         "title": "Decree No. (43) of 2013",
         "clause": "Article 1",
         "url": "https://dubailand.gov.ae/",
-        "verbatim": "Sets maximum permitted percentage increase in property rent.",
+        "verbatim": "Sets maximum…",
     },
     "logic": "banded_percentage",
     "inputs": {},
@@ -231,119 +560,29 @@ MINIMAL = {
         {"gap_from": 0.10, "gap_to": None, "max_increase": 0.20},
     ],
     "review_notes": [],
-    "approval": {"status": "unsigned", "approved_by": None,
-                 "approved_at": None, "signature": None},
+    "approval": {"status": "unsigned", "approved_by": None, "approved_at": None, "signature": None},
 }
 
+
 def test_parses_minimal_rule():
-    rule = Rule.model_validate(MINIMAL)
-    assert rule.id == "rent_increase.dubai.decree_43_2013"
-    assert rule.approval.status is ApprovalStatus.UNSIGNED
+    assert Rule.model_validate(MINIMAL).approval.status is ApprovalStatus.UNSIGNED
+
 
 def test_body_for_signing_excludes_approval():
     body = Rule.model_validate(MINIMAL).body_for_signing()
-    assert "approval" not in body
-    assert body["id"] == "rent_increase.dubai.decree_43_2013"
+    assert "approval" not in body and body["version"] == 1
 
-def test_citation_fields_are_mandatory():
-    broken = {**MINIMAL, "source": {**MINIMAL["source"], "clause": None}}
+
+def test_citation_clause_is_mandatory():
     with pytest.raises(Exception):
-        Rule.model_validate(broken)
+        Rule.model_validate({**MINIMAL, "source": {**MINIMAL["source"], "clause": None}})
+
+
+def test_unknown_field_is_rejected():
+    """A typo in a rule file must fail loudly, not be silently ignored."""
+    with pytest.raises(Exception):
+        Rule.model_validate({**MINIMAL, "band": []})
 ```
-
-- [ ] **Step 2: Run and confirm failure**
-
-Run: `pytest tests/registry/test_schema.py -v`
-Expected: FAIL — `ModuleNotFoundError: bayyina.registry.schema`
-
-- [ ] **Step 3: Implement the schema**
-
-```python
-# src/bayyina/registry/schema.py
-from __future__ import annotations
-
-from datetime import date, datetime
-from enum import Enum
-from typing import Any
-
-from pydantic import BaseModel, ConfigDict, Field
-
-
-class ApprovalStatus(str, Enum):
-    UNSIGNED = "unsigned"        # loader refuses — service will not boot
-    PROVISIONAL = "provisional"  # loads; agent must disclose aloud
-    CERTIFIED = "certified"      # reviewed by a qualified person
-
-
-class RuleSource(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    document_id: str
-    title: str
-    clause: str            # mandatory: no verdict without a citation
-    url: str
-    verbatim: str
-
-
-class RuleApproval(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    status: ApprovalStatus = ApprovalStatus.UNSIGNED
-    approved_by: str | None = None
-    approved_at: datetime | None = None
-    signature: str | None = None
-
-
-class Band(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    gap_from: float
-    gap_to: float | None      # None == unbounded upper band
-    max_increase: float
-
-
-class Rule(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    id: str
-    version: int
-    jurisdiction: str
-    effective_from: date
-    effective_to: date | None = None
-    source: RuleSource
-    logic: str
-    inputs: dict[str, Any] = Field(default_factory=dict)
-    bands: list[Band] | None = None
-    review_notes: list[str] = Field(default_factory=list)
-    approval: RuleApproval = Field(default_factory=RuleApproval)
-
-    def body_for_signing(self) -> dict[str, Any]:
-        """The rule minus its approval block. This is what gets hashed."""
-        return self.model_dump(mode="json", exclude={"approval"})
-```
-
-- [ ] **Step 4: Run and confirm all three tests pass**
-
-Run: `pytest tests/registry/test_schema.py -v`
-Expected: 3 passed
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add src/bayyina/registry tests/registry
-git commit -m "feat: rule schema with mandatory citation fields"
-```
-
----
-
-## Task 3: Signing and verification
-
-**Files:**
-- Create: `src/bayyina/registry/signing.py`
-- Test: `tests/registry/test_signing.py`
-
-**Interfaces:**
-- Consumes: `Rule` from Task 2.
-- Produces: `rule_digest(rule: Rule) -> str` returning `"sha256:<hex>"`;
-  `verify_signature(rule: Rule) -> bool`.
-
-- [ ] **Step 1: Write the failing test**
 
 ```python
 # tests/registry/test_signing.py
@@ -352,124 +591,77 @@ from bayyina.registry.signing import rule_digest, verify_signature
 from tests.registry.test_schema import MINIMAL
 
 
-def _rule(**overrides):
-    data = {**MINIMAL, **overrides}
-    return Rule.model_validate(data)
+def _rule(**over):
+    return Rule.model_validate({**MINIMAL, **over})
 
 
 def test_digest_is_stable():
     assert rule_digest(_rule()) == rule_digest(_rule())
 
 
-def test_digest_changes_when_body_changes():
-    tampered = _rule(bands=[{"gap_from": 0.0, "gap_to": 0.10,
-                             "max_increase": 0.99}])
+def test_digest_changes_when_a_band_changes():
+    tampered = _rule(bands=[{"gap_from": 0.0, "gap_to": 0.10, "max_increase": 0.99}])
     assert rule_digest(_rule()) != rule_digest(tampered)
 
 
-def test_digest_ignores_approval_block():
-    signed = _rule(approval={"status": "provisional", "approved_by": "team",
-                             "approved_at": "2026-09-07T00:00:00Z",
-                             "signature": "sha256:whatever"})
+def test_digest_ignores_the_approval_block():
+    signed = _rule(
+        approval={
+            "status": "provisional",
+            "approved_by": "team",
+            "approved_at": "2026-09-09T00:00:00Z",
+            "signature": "sha256:anything",
+        }
+    )
     assert rule_digest(_rule()) == rule_digest(signed)
 
 
-def test_verify_accepts_matching_signature():
-    base = _rule()
-    good = _rule(approval={"status": "provisional", "approved_by": "team",
-                           "approved_at": "2026-09-07T00:00:00Z",
-                           "signature": rule_digest(base)})
+def test_verify_accepts_a_matching_signature():
+    good = _rule(
+        approval={
+            "status": "provisional",
+            "approved_by": "team",
+            "approved_at": "2026-09-09T00:00:00Z",
+            "signature": rule_digest(_rule()),
+        }
+    )
     assert verify_signature(good) is True
 
 
-def test_verify_rejects_tampered_body():
-    base = _rule()
-    tampered = _rule(
+def test_verify_rejects_a_tampered_body():
+    bad = _rule(
         bands=[{"gap_from": 0.0, "gap_to": 0.10, "max_increase": 0.99}],
-        approval={"status": "provisional", "approved_by": "team",
-                  "approved_at": "2026-09-07T00:00:00Z",
-                  "signature": rule_digest(base)},
+        approval={
+            "status": "provisional",
+            "approved_by": "team",
+            "approved_at": "2026-09-09T00:00:00Z",
+            "signature": rule_digest(_rule()),
+        },
     )
-    assert verify_signature(tampered) is False
+    assert verify_signature(bad) is False
 ```
-
-- [ ] **Step 2: Run and confirm failure**
-
-Run: `pytest tests/registry/test_signing.py -v`
-Expected: FAIL — `ModuleNotFoundError: bayyina.registry.signing`
-
-- [ ] **Step 3: Implement**
-
-```python
-# src/bayyina/registry/signing.py
-from __future__ import annotations
-
-import hashlib
-import json
-
-from bayyina.registry.schema import Rule
-
-
-def _canonical_bytes(body: dict) -> bytes:
-    """Deterministic serialisation: sorted keys, no incidental whitespace."""
-    return json.dumps(
-        body, sort_keys=True, separators=(",", ":"), ensure_ascii=False
-    ).encode("utf-8")
-
-
-def rule_digest(rule: Rule) -> str:
-    """Hash of the rule body, excluding the approval block."""
-    digest = hashlib.sha256(_canonical_bytes(rule.body_for_signing())).hexdigest()
-    return f"sha256:{digest}"
-
-
-def verify_signature(rule: Rule) -> bool:
-    """True when the recorded signature matches the current rule body."""
-    if not rule.approval.signature:
-        return False
-    return rule.approval.signature == rule_digest(rule)
-```
-
-- [ ] **Step 4: Run and confirm all five tests pass**
-
-Run: `pytest tests/registry/test_signing.py -v`
-Expected: 5 passed
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add src/bayyina/registry/signing.py tests/registry/test_signing.py
-git commit -m "feat: canonical rule digest and signature verification"
-```
-
----
-
-## Task 4: Loader — guardrail G7
-
-**Files:**
-- Create: `src/bayyina/registry/loader.py`
-- Test: `tests/registry/test_loader.py`
-
-**Interfaces:**
-- Consumes: `Rule`, `verify_signature`.
-- Produces: `load_rules(directory: Path) -> dict[str, Rule]`;
-  exceptions `UnsignedRuleError`, `TamperedRuleError`.
-
-**This is guardrail G7.** The service must not boot with an unsigned corpus.
-
-- [ ] **Step 1: Write the failing test**
 
 ```python
 # tests/registry/test_loader.py
-import yaml
-import pytest
-
-from bayyina.registry.loader import (
-    load_rules, UnsignedRuleError, TamperedRuleError,
-)
+import pytest, yaml
+from bayyina.registry.loader import load_rules, UnsignedRuleError, TamperedRuleError
 from bayyina.registry.schema import Rule
 from bayyina.registry.signing import rule_digest
 from tests.registry.test_schema import MINIMAL
+
+
+def _signed(data):
+    out = {
+        **data,
+        "approval": {
+            "status": "provisional",
+            "approved_by": "team",
+            "approved_at": "2026-09-09T00:00:00Z",
+            "signature": None,
+        },
+    }
+    out["approval"]["signature"] = rule_digest(Rule.model_validate(out))
+    return out
 
 
 def _write(tmp_path, data, name="r.v1.yaml"):
@@ -477,119 +669,99 @@ def _write(tmp_path, data, name="r.v1.yaml"):
     return tmp_path
 
 
-def _signed(data):
-    signed = {**data, "approval": {"status": "provisional",
-                                   "approved_by": "team",
-                                   "approved_at": "2026-09-07T00:00:00Z",
-                                   "signature": None}}
-    signed["approval"]["signature"] = rule_digest(Rule.model_validate(signed))
-    return signed
-
-
-def test_refuses_unsigned_rule(tmp_path):
-    _write(tmp_path, MINIMAL)
+def test_refuses_an_unsigned_rule(tmp_path):
     with pytest.raises(UnsignedRuleError):
-        load_rules(tmp_path)
+        load_rules(_write(tmp_path, MINIMAL))
 
 
-def test_refuses_tampered_rule(tmp_path):
+def test_refuses_a_tampered_rule(tmp_path):
     data = _signed(MINIMAL)
-    data["bands"][0]["max_increase"] = 0.99   # tamper after signing
-    _write(tmp_path, data)
+    data["bands"][0]["max_increase"] = 0.99  # tampered after signing
     with pytest.raises(TamperedRuleError):
-        load_rules(tmp_path)
+        load_rules(_write(tmp_path, data))
 
 
-def test_loads_signed_rule(tmp_path):
-    _write(tmp_path, _signed(MINIMAL))
-    rules = load_rules(tmp_path)
+def test_loads_a_signed_rule(tmp_path):
+    rules = load_rules(_write(tmp_path, _signed(MINIMAL)))
     assert "rent_increase.dubai.decree_43_2013" in rules
+
+
+def test_error_names_the_offending_file(tmp_path):
+    """An operator must be able to fix this from the message alone."""
+    with pytest.raises(UnsignedRuleError, match="r.v1.yaml"):
+        load_rules(_write(tmp_path, MINIMAL))
 ```
 
-- [ ] **Step 2: Run and confirm failure**
+- [x] **Run, confirm all fail** with `ModuleNotFoundError`
 
-Run: `pytest tests/registry/test_loader.py -v`
-Expected: FAIL — `ModuleNotFoundError: bayyina.registry.loader`
+- [x] **Implement `schema.py`** — Pydantic models with `extra="forbid"` on every
+      model so a typo in a rule file fails loudly. `clause`, `verbatim` and `url`
+      are required on `RuleSource`.
 
-- [ ] **Step 3: Implement**
+- [x] **Implement `signing.py`**
 
 ```python
-# src/bayyina/registry/loader.py
-from __future__ import annotations
-
-from pathlib import Path
-
-import yaml
-
-from bayyina.registry.schema import ApprovalStatus, Rule
-from bayyina.registry.signing import verify_signature
+# src/bayyina/registry/signing.py
+import hashlib, json
+from bayyina.registry.schema import Rule
 
 
-class UnsignedRuleError(RuntimeError):
-    """A rule in the corpus carries no approval. The service must not boot."""
+def _canonical_bytes(body: dict) -> bytes:
+    """Deterministic serialisation: sorted keys, no incidental whitespace."""
+    return json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode(
+        "utf-8"
+    )
 
 
-class TamperedRuleError(RuntimeError):
-    """A rule body no longer matches its recorded signature."""
+def rule_digest(rule: Rule) -> str:
+    body = _canonical_bytes(rule.body_for_signing())
+    return f"sha256:{hashlib.sha256(body).hexdigest()}"
 
 
-def load_rules(directory: Path) -> dict[str, Rule]:
-    rules: dict[str, Rule] = {}
-    for path in sorted(Path(directory).glob("*.yaml")):
-        rule = Rule.model_validate(yaml.safe_load(path.read_text("utf-8")))
-
-        if rule.approval.status is ApprovalStatus.UNSIGNED:
-            raise UnsignedRuleError(
-                f"{path.name}: rule {rule.id} v{rule.version} is unsigned. "
-                "An approver must sign it before the service can start."
-            )
-        if not verify_signature(rule):
-            raise TamperedRuleError(
-                f"{path.name}: body of {rule.id} v{rule.version} does not "
-                "match its signature."
-            )
-        rules[rule.id] = rule
-    return rules
+def verify_signature(rule: Rule) -> bool:
+    if not rule.approval.signature:
+        return False
+    return rule.approval.signature == rule_digest(rule)
 ```
 
-- [ ] **Step 4: Run and confirm all three tests pass**
+- [x] **Implement `loader.py`** — raise `UnsignedRuleError` on
+      `ApprovalStatus.UNSIGNED`, `TamperedRuleError` on digest mismatch. **Both
+      messages name the file and the rule id**, because an operator fixes this
+      from the message alone.
 
-Run: `pytest tests/registry/test_loader.py -v`
-Expected: 3 passed
+- [x] **Write `scripts/sign_rule.py` and `scripts/verify_corpus.py`** per
+      [ARCHITECTURE.md](docs/ARCHITECTURE.md) §5.2.1. `verify_corpus.py` exits
+      non-zero on any mismatch.
 
-- [ ] **Step 5: Commit**
+- [x] **Add `python scripts/verify_corpus.py rules/` to CI** — a rule edited
+      without re-signing now fails the build
 
-```bash
-git add src/bayyina/registry/loader.py tests/registry/test_loader.py
-git commit -m "feat: G7 loader refuses unsigned and tampered rules"
-```
+- [x] **Run:** `pytest tests/registry -v` → all pass
+
+**DoD:** Editing one digit in a signed rule file makes CI fail *and* makes the
+loader raise. Demonstrate both by hand — **this is the wow moment and it must work
+on the first try on stage.**
 
 ---
 
-## Task 5: Rent increase logic
+## T1.3 — Rent increase logic
 
-**Files:**
-- Create: `src/bayyina/rules_logic/__init__.py`, `src/bayyina/rules_logic/banded_percentage.py`
-- Test: `tests/rules_logic/test_banded_percentage.py`
+**Files:** `src/bayyina/rules_logic/banded_percentage.py`
+**Test:** `tests/rules_logic/test_banded_percentage.py`
 
-**Interfaces:**
-- Produces: `evaluate(current_annual_rent: Decimal, market_average_rent: Decimal,
-  proposed_annual_rent: Decimal, bands: list[Band]) -> BandedResult` where
-  `BandedResult` has `verdict: str`, `gap_pct: float`, `band_matched: int`,
-  `max_increase_pct: float`, `max_lawful_rent: Decimal`,
-  `proposed_increase_pct: float`.
+**Interface produced:** `evaluate(current_annual_rent, market_average_rent,
+proposed_annual_rent, bands) -> BandedResult(verdict, gap_pct, band_matched,
+max_increase_pct, max_lawful_rent, proposed_increase_pct)`
 
-Band semantics: bands are ascending; the first band whose `gap_to` is `None` or
-`>= gap` matches. So gap 0.10 → band 0 (0%), gap 0.1001 → band 1 (5%).
+Band semantics: ascending; the first band whose `gap_to` is `None` or `>= gap`
+matches. Gap 0.10 → band 0 (0%); gap 0.1001 → band 1 (5%).
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Write the failing test**
 
 ```python
 # tests/rules_logic/test_banded_percentage.py
 from decimal import Decimal
-
 import pytest
-
 from bayyina.registry.schema import Band
 from bayyina.rules_logic.banded_percentage import evaluate
 
@@ -603,1136 +775,788 @@ BANDS = [
 
 
 @pytest.mark.parametrize(
-    "current,market,expected_band,expected_max",
+    "current,market,band,cap",
     [
         (Decimal("100000"), Decimal("100000"), 0, 0.00),  # at market
-        (Decimal("90000"),  Decimal("100000"), 0, 0.00),  # exactly 10% below
-        (Decimal("89000"),  Decimal("100000"), 1, 0.05),  # just over 10%
-        (Decimal("80000"),  Decimal("100000"), 1, 0.05),  # exactly 20%
-        (Decimal("70000"),  Decimal("100000"), 2, 0.10),  # exactly 30%
-        (Decimal("60000"),  Decimal("100000"), 3, 0.15),  # exactly 40%
-        (Decimal("50000"),  Decimal("100000"), 4, 0.20),  # 50% below
+        (Decimal("90000"), Decimal("100000"), 0, 0.00),  # exactly 10% below
+        (Decimal("89000"), Decimal("100000"), 1, 0.05),  # just past 10%
+        (Decimal("80000"), Decimal("100000"), 1, 0.05),  # exactly 20%
+        (Decimal("70000"), Decimal("100000"), 2, 0.10),  # exactly 30%
+        (Decimal("60000"), Decimal("100000"), 3, 0.15),  # exactly 40%
+        (Decimal("50000"), Decimal("100000"), 4, 0.20),  # 50% below
     ],
 )
-def test_band_boundaries(current, market, expected_band, expected_max):
+def test_every_band_boundary(current, market, band, cap):
     r = evaluate(current, market, current, BANDS)
-    assert r.band_matched == expected_band
-    assert r.max_increase_pct == pytest.approx(expected_max)
+    assert r.band_matched == band
+    assert r.max_increase_pct == pytest.approx(cap)
 
 
 def test_rent_above_market_permits_no_increase():
     r = evaluate(Decimal("120000"), Decimal("100000"), Decimal("125000"), BANDS)
-    assert r.band_matched == 0
+    assert r.band_matched == 0 and r.verdict == "not_permitted"
+
+
+def test_the_canonical_demo_case():
+    """80k current, 85k market, 96k proposed -> 5.9% gap, 0% permitted."""
+    r = evaluate(Decimal("80000"), Decimal("85000"), Decimal("96000"), BANDS)
     assert r.verdict == "not_permitted"
+    assert r.gap_pct == pytest.approx(0.0588, abs=0.001)
+    assert r.max_lawful_rent == Decimal("80000.00")
 
 
-def test_permitted_when_proposal_within_cap():
+def test_permitted_when_within_cap():
     r = evaluate(Decimal("50000"), Decimal("100000"), Decimal("60000"), BANDS)
-    assert r.max_lawful_rent == Decimal("60000.00")
-    assert r.verdict == "permitted"
+    assert r.verdict == "permitted" and r.max_lawful_rent == Decimal("60000.00")
 
 
-def test_not_permitted_when_proposal_exceeds_cap():
-    r = evaluate(Decimal("50000"), Decimal("100000"), Decimal("61000"), BANDS)
+def test_one_dirham_over_the_cap_is_not_permitted():
+    r = evaluate(Decimal("50000"), Decimal("100000"), Decimal("60000.01"), BANDS)
     assert r.verdict == "not_permitted"
 
 
-def test_zero_market_average_is_rejected():
+@pytest.mark.parametrize(
+    "market,current",
+    [
+        (Decimal("0"), Decimal("50000")),
+        (Decimal("100000"), Decimal("0")),
+    ],
+)
+def test_non_positive_inputs_are_rejected(market, current):
     with pytest.raises(ValueError):
-        evaluate(Decimal("50000"), Decimal("0"), Decimal("60000"), BANDS)
+        evaluate(current, market, Decimal("60000"), BANDS)
 ```
 
-- [ ] **Step 2: Run and confirm failure**
+- [x] **Run, confirm failure**
+- [x] **Implement** — `gap = max(0.0, (market - current) / market)`; first matching
+      band wins; `max_lawful_rent` quantised to cents with `ROUND_HALF_UP`
+- [x] **Run, confirm pass** — 13 passed
 
-Run: `pytest tests/rules_logic/test_banded_percentage.py -v`
-Expected: FAIL — `ModuleNotFoundError`
-
-- [ ] **Step 3: Implement**
-
-```python
-# src/bayyina/rules_logic/banded_percentage.py
-from __future__ import annotations
-
-from dataclasses import dataclass
-from decimal import ROUND_HALF_UP, Decimal
-
-from bayyina.registry.schema import Band
-
-_CENTS = Decimal("0.01")
-
-
-@dataclass(frozen=True)
-class BandedResult:
-    verdict: str
-    gap_pct: float
-    band_matched: int
-    max_increase_pct: float
-    max_lawful_rent: Decimal
-    proposed_increase_pct: float
-
-
-def evaluate(
-    current_annual_rent: Decimal,
-    market_average_rent: Decimal,
-    proposed_annual_rent: Decimal,
-    bands: list[Band],
-) -> BandedResult:
-    if market_average_rent <= 0:
-        raise ValueError("market_average_rent must be positive")
-    if current_annual_rent <= 0:
-        raise ValueError("current_annual_rent must be positive")
-
-    # How far the current rent sits BELOW the market average.
-    # At or above market, the gap is zero and the lowest band applies.
-    raw_gap = (market_average_rent - current_annual_rent) / market_average_rent
-    gap = max(0.0, float(raw_gap))
-
-    for index, band in enumerate(bands):
-        if band.gap_to is None or gap <= band.gap_to:
-            max_increase = band.max_increase
-            matched = index
-            break
-    else:  # pragma: no cover - bands always end with an unbounded band
-        raise ValueError("no band matched; corpus is malformed")
-
-    max_lawful = (
-        current_annual_rent * (Decimal("1") + Decimal(str(max_increase)))
-    ).quantize(_CENTS, rounding=ROUND_HALF_UP)
-
-    proposed_increase = float(
-        (proposed_annual_rent - current_annual_rent) / current_annual_rent
-    )
-
-    return BandedResult(
-        verdict="permitted" if proposed_annual_rent <= max_lawful else "not_permitted",
-        gap_pct=gap,
-        band_matched=matched,
-        max_increase_pct=max_increase,
-        max_lawful_rent=max_lawful,
-        proposed_increase_pct=proposed_increase,
-    )
-```
-
-- [ ] **Step 4: Run and confirm all tests pass**
-
-Run: `pytest tests/rules_logic/test_banded_percentage.py -v`
-Expected: 11 passed
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add src/bayyina/rules_logic tests/rules_logic
-git commit -m "feat: Decree 43/2013 banded percentage evaluation"
-```
+**DoD:** Every band boundary tested on both sides. The demo case is a named test,
+so a regression that breaks the stage demo fails CI.
 
 ---
 
-## Task 6: Notice validity logic
+## T1.4 — Notice validity logic
 
-**Files:**
-- Create: `src/bayyina/rules_logic/notice_period.py`
-- Test: `tests/rules_logic/test_notice_period.py`
+**Files:** `src/bayyina/rules_logic/notice_period.py`
+**Test:** `tests/rules_logic/test_notice_period.py`
 
-**Interfaces:**
-- Produces: `evaluate(contract_expiry: date, notice_served: date,
-  required_days: int) -> NoticeResult` with `verdict`, `days_notice`,
-  `required_days`, `shortfall_days`.
+**Interface produced:** `evaluate(contract_expiry, notice_served, required_days)
+-> NoticeResult(verdict, days_notice, required_days, shortfall_days)`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Write the failing test**
 
 ```python
 # tests/rules_logic/test_notice_period.py
 from datetime import date
-
 import pytest
-
 from bayyina.rules_logic.notice_period import evaluate
 
 
 @pytest.mark.parametrize(
-    "served,expected_verdict,expected_days",
+    "served,verdict,days",
     [
-        (date(2026, 1, 1),  "valid",   90),   # exactly 90 days
-        (date(2025, 12, 1), "valid",  121),   # comfortably early
-        (date(2026, 1, 2),  "invalid", 89),   # one day short
-        (date(2026, 3, 1),  "invalid",  31),  # far too late
+        (date(2026, 1, 1), "valid", 90),  # exactly 90
+        (date(2025, 12, 1), "valid", 121),
+        (date(2026, 1, 2), "invalid", 89),  # one day short
+        (date(2026, 3, 1), "invalid", 31),
     ],
 )
-def test_ninety_day_boundary(served, expected_verdict, expected_days):
+def test_the_ninety_day_boundary(served, verdict, days):
     r = evaluate(date(2026, 4, 1), served, 90)
-    assert r.days_notice == expected_days
-    assert r.verdict == expected_verdict
+    assert (r.verdict, r.days_notice) == (verdict, days)
 
 
-def test_shortfall_is_reported():
-    r = evaluate(date(2026, 4, 1), date(2026, 1, 2), 90)
-    assert r.shortfall_days == 1
+def test_the_canonical_demo_case():
+    """Expiry 30 Nov, served 20 Sep -> 71 days, insufficient."""
+    r = evaluate(date(2026, 11, 30), date(2026, 9, 20), 90)
+    assert r.verdict == "invalid" and r.days_notice == 71 and r.shortfall_days == 19
 
 
 def test_valid_notice_has_zero_shortfall():
     assert evaluate(date(2026, 4, 1), date(2026, 1, 1), 90).shortfall_days == 0
 
 
-def test_notice_after_expiry_is_invalid():
+def test_notice_served_after_expiry_is_invalid():
     r = evaluate(date(2026, 4, 1), date(2026, 5, 1), 90)
-    assert r.verdict == "invalid"
-    assert r.days_notice < 0
+    assert r.verdict == "invalid" and r.days_notice < 0
 ```
 
-- [ ] **Step 2: Run and confirm failure**
+- [x] **Run, confirm failure**
+- [x] **Implement** — `days_notice = (expiry - served).days`;
+      `shortfall = max(0, required - days_notice)`
+- [x] **Run, confirm pass** — 7 passed
 
-Run: `pytest tests/rules_logic/test_notice_period.py -v`
-Expected: FAIL — `ModuleNotFoundError`
+**DoD:** The 89/90/91 boundary is explicit. The demo case is a named test.
 
-- [ ] **Step 3: Implement**
+---
+
+## T1.5 — Evaluator and evaluation record
+
+**Files:** `src/bayyina/registry/evaluator.py`, `src/bayyina/audit.py`
+**Test:** `tests/registry/test_evaluator.py`, `tests/test_audit.py`, `tests/conftest.py`
+
+**Interfaces produced:**
+- `EvaluationRecord` — Pydantic, per [ARCHITECTURE.md](docs/ARCHITECTURE.md) §5.4.
+  **`citation` is non-nullable** and every field inside it has a minimum length
+- `Citation.from_rule(rule)`, `MarketEvidence(contract_count, snapshot_id)`,
+  `OutcomeState` — `CLEAR` / `CLEAR_WITH_CONDITIONS` / `HUMAN_REVIEW_REQUIRED`
+- `Evaluator(rules, *, settings=None).evaluate(rule_id, inputs, input_sources, *, market=None)`
+- `AuditLog.append(record)` — append-only, hash-chained; `verify_chain()`
+
+- [x] **Write the failing tests** — 37 for the evaluator, 10 for the audit log
+- [x] **Run, confirm failure** — `ModuleNotFoundError: bayyina.registry.evaluator`
+- [x] **Implement** — dispatch on `rule.logic` through `_DISPATCH`, which a test
+      asserts is total over `RuleLogic`; `eval_id` is `ev_` + uuid4; `created_at`
+      is UTC-aware. Inputs are coerced by their declared type, and money given as
+      a float is refused
+- [x] **Enforce G5 structurally** — below the evidence threshold the rule is not
+      run, and the record type refuses a `HUMAN_REVIEW_REQUIRED` record carrying
+      a verdict, a computed figure, or a confidence number (D-030)
+- [x] **Enforce G9** — every supplied input must carry a recorded source; the
+      audit log chains each entry to the digest of the one before it (D-032)
+- [x] **Prove the guardrails fail when broken** — deleting the state validator,
+      the citation minimum length, the provenance check, or the record from the
+      chain digest each turns its test red
+- [x] **Run, confirm pass** — 152 backend tests
+
+**DoD:** `EvaluationRecord` cannot be constructed without a citation. That is G1,
+enforced by a type rather than a habit. ✅ And a record cannot claim human review
+while carrying a number — G5, same mechanism.
+
+---
+
+## T1.6 — Write and sign the two rules
+
+**Files:** `rules/rent_increase.dubai.decree_43_2013.v1.yaml`,
+`rules/notice_validity.dubai.law_26_2007_a14.v1.yaml`
+**Test:** `tests/test_corpus.py`
+
+> **Run before T1.5.** T1.5's tests load the production corpus rather than a
+> stub, and T1.6 depends on nothing T1.5 produces (D-033).
+
+- [x] **Write the failing test** — `rules/` was empty, so `EmptyCorpusError`
+- [x] **Write both YAML files** per [ARCHITECTURE.md](docs/ARCHITECTURE.md) §5.1.
+      `approval.status: provisional`. Twelve `review_notes` between them, each an
+      open question a reviewer must close (D-029)
+- [x] **Sign both:** `python scripts/sign_rule.py rules/<file>.yaml`
+- [x] **Keep the signed file readable** — the signer re-emits multi-line strings
+      in block style, so a five-clause verbatim quote survives as a readable diff
+- [x] **Remove `--allow-empty` from the CI corpus step.** The corpus now exists,
+      so an empty `rules/` means a deleted file or a container build that did not
+      copy it. That must turn CI red rather than pass
+- [x] **Run, confirm pass** — 8 corpus tests
+
+**DoD:** `verify_corpus.py rules/` exits zero and prints both signatures. ✅
+Both rules render complete provenance. The tamper demo runs against the real
+corpus: one digit changed → `CORPUS REJECTED`, exit 1.
+
+---
+
+## T1.7 — API: `/evaluate` and `/healthz`
+
+**Files:** `src/bayyina/api/{app,routes_evaluate}.py`, `src/bayyina/observability.py`,
+`src/bayyina/rules_logic/errors.py`
+**Test:** `tests/api/test_evaluate.py`, `tests/api/test_boot.py`
+
+**Interfaces produced:**
+- `create_app(*, rules_dir=None, audit_path=None, settings=None) -> FastAPI` —
+  loads and verifies the corpus **before returning an app**
+- `POST /evaluate` — `{rule_id, inputs, input_sources, market?}` → `EvaluationRecord`
+- `GET /healthz` — status, `checks`, `not_yet_checked`, every rule and signature
+- `RuleInputError` / `RuleLogicError` — whose problem a failure is
+
+- [x] **Write the failing tests** — 30 across boot and the endpoints
+- [x] **Run, confirm failure** — `ModuleNotFoundError: bayyina.api`
+- [x] **Implement.** `create_app()` calls `load_rules()` before the app exists —
+      not in a startup event, which would leave a constructed app behind on
+      failure. `bayyina.api.app:app` resolves through a module `__getattr__`, so
+      the documented uvicorn command still refuses to start on a bad corpus while
+      importing the module stays free of side effects
+- [x] **Add response timing** — `x-response-ms` on every response, errors included
+- [x] **Separate whose problem a failure is** — `RuleInputError` → 422,
+      `UnknownRuleError` → 404, `RuleLogicError` → **500**. A corpus defect
+      reported as a 4xx would send a caller into retrying forever
+- [x] **Amounts cross the wire as strings or ints, never floats** — refused at the
+      request model, so a rounding artefact cannot reach the number someone acts on
+- [x] **G5 over HTTP is a 200** — `HUMAN_REVIEW_REQUIRED` is an outcome; a 4xx
+      would teach every client to treat honesty as a fault
+- [x] **G9 over HTTP** — every evaluation appended to the chained audit log before
+      the response leaves; refused requests write nothing
+- [x] **Prove the mechanisms** — moving the corpus check after app construction,
+      removing the timing middleware, dropping the audit append, or mapping
+      `RuleLogicError` to 422 each turns its tests red
+- [x] **Wire the logging that T1.7 introduced** — the timing lines had no handler
+      and emitted nothing under uvicorn, which uvicorn's own access log hides.
+      Found by running the real server, not by the tests (D-044)
+- [x] **Gitignore the audit log** — `backend/data/audit.jsonl` holds caller-stated
+      rents and dates. It must never reach the repository
+- [x] **Refuse a non-HTTPS base URL in production** — that URL becomes the SMS
+      link to a resident's evidence pack (D-045)
+- [x] **Implement the public rate limit** — `public_rate_limit_per_minute` had
+      been advertised as an abuse guard since T1.1 with nothing behind it, and
+      `/evaluate` goes public at T1.9. `/healthz` is exempt (D-047)
+- [x] **Distinguish a missing corpus directory from an empty one** — the failure
+      T1.9 is most likely to hit, with the resolved path in the message (D-046)
+- [x] **Hold `.env.example` and `Settings` together** — two tests, and every
+      declared-but-unread field now names the task that reads it (D-048)
+- [x] **Run, confirm pass** — 218 backend tests
+
+**DoD:** `/healthz` fails on an unsigned corpus. ✅ Every response is timed from
+day one — we do not add observability later. ✅ The tamper demo runs through the
+documented entry point: one digit changed → `verify_corpus` exits 1 and
+`uvicorn bayyina.api.app:app` raises `TamperedRuleError`.
+
+**Not done here, deliberately:** G3's confirmation token (Phase 3, and
+ARCHITECTURE §9 now says the endpoint does not enforce it); `GET /rules` public
+transparency (T2.6); rate limiting (`public_rate_limit_per_minute` is still
+unread config).
+
+---
+
+## T1.8 — Minimal web checker
+
+**Files:** `frontend/src/components/Checker.tsx`, `frontend/src/api/client.ts`,
+`frontend/src/test/phone-safety.test.ts`
+**Modify:** `backend/src/bayyina/api/app.py` to serve the built frontend,
+`backend/src/bayyina/registry/evaluator.py` for named conditions
+
+A single form: current rent, proposed rent, and a **manually entered** market
+average with a note that automatic comparables arrive in T2.3. Displays verdict,
+computation, cited clause and `review_status`.
+
+- [x] **Build the form and wire it to `/evaluate`**
+- [x] **Name the condition rather than inventing evidence.** The market average
+      is typed by the reader, so the request carries no `contract_count`. The
+      outcome is `CLEAR_WITH_CONDITIONS` naming `market_average_not_derived`.
+      Sending a fabricated count to obtain a clean `CLEAR` would be the exact
+      fabrication G5 exists to prevent (D-049)
+- [x] **Verify by hand against three cases** — permitted, not permitted, and the
+      one-fils edge. Run against the real backend, not mocks:
+      exactly at AED 88,000.00 → permitted; AED 88,000.01 → not permitted
+- [x] **Render human review as considered, never as failure** — the review
+      colour, no `alert` role, and no banned word. Proven: switching it to the
+      danger colour turns the test red
+- [x] **Refuse to print a figure the outcome forbids** — the interface is the
+      last surface before a person reads a number, so it drops computed figures
+      on `HUMAN_REVIEW_REQUIRED` even if the payload carries them
+- [x] **Serve the built frontend from the API process** — mounted last so it can
+      never shadow a route; absent in development, where Vite serves it
+- [x] **Confirm it is readable on a phone** — viewport declared, 44px tap
+      targets, no fixed pixel widths, and the 71-character signature broken so it
+      cannot widen the page. Enforced by `phone-safety.test.ts`, not remembered
+- [x] **Run, confirm pass** — 234 backend, 50 frontend
+
+**DoD:** A stranger can reach a correct verdict without instructions. ✅ Verified
+end to end as one process: `GET /` serves the app, `POST /evaluate` answers from
+the same origin, no CORS.
+
+**Not done here, deliberately:** the notice-validity check (the plan scopes T1.8
+to the rent rule); Arabic and Malayalam copy, which needs a human translator per
+D-013 and is gated on the glossary, not on code.
+
+---
+
+## T1.9 — Deploy ⚠ THIS IS BOX N
+
+**Files:** `Dockerfile`, `.dockerignore`, `.gitattributes`, `fly.toml`,
+`render.yaml`, `backend/src/bayyina/api/security.py`, `.github/workflows/ci.yml`
+
+### Engineering — done
+
+- [x] **Write the Dockerfile** — multi-stage: Node builds the interface, Python
+      runs it. Non-root (uid 10001), no bytecode written, logs unbuffered
+- [x] **Verify the corpus at image build time.** G7 as early as it can go: an
+      image carrying an unsigned or tampered rule fails to build. CI proves it by
+      tampering with a rule and asserting the build refuses
+- [x] **TLS at the edge, never in-process** — uvicorn runs with
+      `--proxy-headers --forwarded-allow-ips '*'`, so the real scheme and client
+      address survive the proxy hop
+- [x] **Security headers** — a strict CSP with no `unsafe-inline`, verified
+      against the built page rather than assumed; `X-Frame-Options: DENY`;
+      HSTS **only over TLS**, because sending it on a local dev server pins
+      localhost to https in the developer's browser (D-055)
+- [x] **Normalise line endings** — `.gitattributes`, and 29 files converted.
+      CRLF breaks every `run:` block on a Linux runner (D-056)
+- [x] **Assert the rule digest survives a line-ending change** — otherwise a
+      Windows-to-Linux checkout would break every signature at once
+- [x] **Fix `audit_writable`** — it checked that the directory existed, which is
+      not the same as being able to write to it
+- [x] **CI builds the image and smoke-tests the container** — `/healthz` reports
+      two signed rules, `/` serves the interface, `/evaluate` returns the verified
+      demo verdict, and the process is not root
+- [x] **Platform configs** — `fly.toml` (recommended, kept warm) and
+      `render.yaml`, both with the cold-start and persistence trade-offs stated
+- [x] **Run, confirm pass** — 242 backend, 50 frontend
+
+### Operator — yours, in order
+
+- [ ] Initialise the repository and push it (**nothing has been committed yet**)
+- [ ] Confirm CI is green, including the new `image` job
+- [ ] Create the host account and run `fly launch --no-deploy`
+- [ ] `fly secrets set BAYYINA_BASE_URL=https://<app>.fly.dev`
+- [ ] `fly deploy`
+- [ ] **Verify `/healthz` reports `corpus_signed: true` in production**
+- [ ] Run the tamper demo against the deployed URL once, so Box N is a claim you
+      have watched work
+- [ ] Check the certificate chain from outside the platform dashboard
+- [ ] Record the live URL in `docs/CANVAS.md` box N and box Q
+
+**DoD:** A public URL returns a correct verdict. **Box N is no longer blocked and
+Stage 1 cannot score zero on it.** This is the single most important gate in the
+plan.
+
+---
+
+# PHASE 2 · Real Data and the Artifact
+
+## T2.0 — Design system and RTL foundation · Track C
+
+**Files:** `frontend/src/index.css`, `docs/DECISIONS.md` — **partly done at the FE/BE split**
+
+This product asks people to trust a legal determination. **A page that looks like
+an unstyled template undermines the claim before a word is read.** One deliberate
+visual pass now, reused by the checker, the provenance pages, the officer
+dashboard and the PDF.
+
+- [ ] Define tokens: type scale, spacing, colour with **WCAG AA contrast
+      verified**, and a state palette where `HUMAN_REVIEW_REQUIRED` reads as
+      *considered*, not as *error*
+- [ ] Choose and bundle the type family — Noto Sans, Noto Sans Arabic, Noto Sans
+      Malayalam, so web and PDF render identically
+- [ ] Build the RTL foundation: `dir="rtl"` mirrors layout, not just text. Use
+      logical properties (`margin-inline-start`, not `margin-left`)
+- [ ] Build at 360 px first, then widen
+- [ ] Record the visual direction in `docs/DECISIONS.md`
+
+**DoD:** One page rendered in all three languages, side by side, at 360 px. Arabic
+mirrors correctly. Contrast passes AA. **Screenshot all three — this is also
+canvas and README material.**
+
+---
+
+## T2.1 — Ingest with data-quality validation
+
+**Files:** `src/bayyina/market/ingest.py`
+**Test:** `tests/market/test_ingest.py`
+
+Ingestion is not `read_csv`. **Bad data produces confident wrong verdicts**, which
+is the worst failure this product can have.
+
+**The rules below are measured from the real file (2026-09-09), not guessed.**
+Source: `rent_contracts_20260226.parquet`, 9,798,685 rows, sha256 `72d347b2…`.
+
+- [ ] **Exclude non-tenancy "residential" stock.** `property_usage_en =
+      'Residential'` includes labour camps and staff accommodation, which are
+      whole-block contracts, not tenancies. Measured medians: `Room in labor Camp`
+      **AED 455,009**; `Staff Accommodatoion` *(misspelt in source)* **AED
+      2,620,000**. Left in, a caller in Jabal Ali gets a market average in the
+      hundreds of thousands. **Exclude by sub-type, and test that Jabal Ali
+      Industrial First returns a plausible flat median**
+- [ ] **Normalise area names.** `Al Barsha South Third` and `Al Barshaa South
+      Third` are distinct codes, and **13,127 contracts sit under the misspelt
+      one**. This is most of a neighbourhood, not a cosmetic issue
+- [ ] **Normalise sub-types.** `1bed room+Hall` vs `2 bed rooms+hall` differ in
+      spacing and capitalisation; `2 bed rooms+hall+Maids Room` must map to 2-bed.
+      **This field is where bedrooms live — there is no bedrooms column**
+- [ ] **Reject implausible rents.** Measured on residential: 35 rows ≤ 0, 2,449
+      below AED 1,000, 45,389 above AED 10,000,000, max **AED 3.3 billion**.
+      Absolute bounds of 1,000–10,000,000 reject ~0.69%
+- [ ] **Add per-cell IQR trimming.** Absolute bounds are not enough: Al Barsha
+      First 2-beds still span AED 9,000 to 6,000,000 after filtering. Trim outside
+      1.5×IQR within each `(area, type, sub_type)` cell
+- [ ] Reject: null or non-positive rent, end date before start, missing area,
+      duplicate `contract_id`
+- [ ] Implement ingest → DuckDB with a `snapshots` row recording `snapshot_id`,
+      `computed_at`, `source`, `source_sha256`, `row_count`, `rejected_count`
+- [ ] Record final counts in `docs/CANVAS.md` box D
+
+**DoD:** Rejection rate recorded and under 5% (expected ~0.7% on absolute bounds
+alone). **A comparable query for an industrial area returns a plausible flat
+median, not a labour-camp figure** — assert this, it is the failure that would
+hurt the exact residents this is built for.
+
+---
+
+## T2.2 — Pre-aggregated comparables ⚠ LATENCY-CRITICAL
+
+**Files:** `src/bayyina/market/aggregate.py`
+**Test:** `tests/market/test_aggregate.py`
+
+**A `GROUP BY` over 9.8M rows at call time cannot meet the 150 ms budget.**
+Materialise medians at build time into a small indexed table.
+
+- [ ] Write a test asserting the aggregate table has one row per
+      `(area, property_type, bedrooms)` with `median_annual_rent`,
+      `contract_count`, `snapshot_id`
+- [ ] **Write a performance test asserting lookup completes in under 20 ms**
+- [ ] Implement aggregation over a rolling 12-month window
+- [ ] Bake the aggregate into the Docker image at build time
+
+**DoD:** A measured lookup under 20 ms on the deployed instance. If it is not, the
+voice product cannot meet its latency budget and this must be fixed now, not later.
+
+---
+
+## T2.3 — Comparables API with G5 thresholds
+
+**Files:** `src/bayyina/market/comparables.py`, route in `routes_evaluate.py`
+**Test:** `tests/market/test_comparables.py`
+
+- [ ] Write tests for the three bands: ≥30 → `ok` full confidence; 10–29 → `ok`
+      reduced confidence; <10 → `insufficient_data` with
+      **`median_annual_rent is None`**
+- [ ] Write a test asserting a stale snapshot (older than
+      `market_snapshot_max_age_days`) returns `stale` and no figure
+- [ ] Implement; wire into `/evaluate` so a thin comparable forces
+      `HUMAN_REVIEW_REQUIRED`
+
+**DoD:** No code path returns a number below the threshold. Assert it, do not
+assume it.
+
+---
+
+## T2.4 — Evidence pack generator (G10)
+
+**Files:** `src/bayyina/evidence/{pack,render}.py`, `templates/{en,ar,ml}/`
+**Test:** `tests/evidence/test_pack.py`
+
+**Interface produced:** `build_pack(records, caller_ref, language) -> EvidencePack`
+
+- [ ] **Write the failing tests**
 
 ```python
-# src/bayyina/rules_logic/notice_period.py
-from __future__ import annotations
-
-from dataclasses import dataclass
-from datetime import date
-
-
-@dataclass(frozen=True)
-class NoticeResult:
-    verdict: str
-    days_notice: int
-    required_days: int
-    shortfall_days: int
+def test_generator_rejects_anything_but_evaluation_records():
+    """G10: no free text can enter the document path."""
+    with pytest.raises(TypeError):
+        build_pack(["some free text"], caller_ref="x", language="en")
 
 
-def evaluate(
-    contract_expiry: date, notice_served: date, required_days: int
-) -> NoticeResult:
-    days_notice = (contract_expiry - notice_served).days
-    shortfall = max(0, required_days - days_notice)
-    return NoticeResult(
-        verdict="valid" if days_notice >= required_days else "invalid",
-        days_notice=days_notice,
-        required_days=required_days,
-        shortfall_days=shortfall,
+def test_pack_marks_caller_stated_facts_as_unverified(rent_eval):
+    text = build_pack([rent_eval], "x", "en").render_text()
+    assert "as stated by the caller" in text.lower()
+
+
+def test_pack_carries_rule_version_and_signature(rent_eval):
+    pack = build_pack([rent_eval], "x", "en")
+    assert pack.signatures[rent_eval.rule_id].startswith("sha256:")
+
+
+def test_pack_states_it_is_not_official(rent_eval):
+    assert (
+        "not an official determination" in build_pack([rent_eval], "x", "en").render_text().lower()
     )
+
+
+def test_pack_renders_in_every_supported_language(rent_eval):
+    for lang in ("en", "ar", "ml"):
+        assert build_pack([rent_eval], "x", lang).render_text().strip()
 ```
 
-- [ ] **Step 4: Run and confirm all tests pass**
+- [ ] Implement `build_pack` accepting **only** `EvaluationRecord` instances —
+      raise `TypeError` otherwise. Jinja templates only; **no LLM import may exist
+      in this module**
+- [ ] Add a test asserting the `evidence` package imports no LLM client
 
-Run: `pytest tests/rules_logic/test_notice_period.py -v`
-Expected: 7 passed
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add src/bayyina/rules_logic/notice_period.py tests/rules_logic/test_notice_period.py
-git commit -m "feat: Law 26/2007 Art.14 notice period evaluation"
-```
+**DoD:** `grep -r "openai\|anthropic\|elevenlabs" src/bayyina/evidence/` returns
+nothing. G10 is verified by inspection, not by trust.
 
 ---
 
-## Task 7: Gratuity logic
+## T2.5 — PDF rendering and font validation ⚠ WILL BITE
 
-**Files:**
-- Create: `src/bayyina/rules_logic/gratuity.py`
-- Test: `tests/rules_logic/test_gratuity.py`
+**Files:** `src/bayyina/evidence/render.py`, `assets/fonts/`
+**Test:** `tests/evidence/test_render.py`
 
-**Interfaces:**
-- Produces: `evaluate(basic_monthly_salary: Decimal, start: date, end: date,
-  unpaid_leave_days: int = 0) -> GratuityResult` with `verdict`,
-  `service_years`, `entitled_days`, `daily_wage`, `gratuity_amount`,
-  `cap_applied: bool`.
+**Malayalam and Arabic will render as blank boxes without the right fonts.**
+Discovering this during the demo is unacceptable.
 
-Article 51: under one year → no entitlement; one to five years → 21 days' basic
-wage per year; beyond five years → 21 days for each of the first five plus 30 days
-for each subsequent year; total capped at two years' wage. **Basic salary only.**
+- [ ] Bundle Noto Sans, Noto Sans Arabic and Noto Sans Malayalam
+- [ ] Write a test rendering each language and asserting the PDF contains no
+      `.notdef` glyphs
+- [ ] Verify Arabic renders right-to-left correctly
+- [ ] **Visually inspect all three PDFs.** Automated glyph checks miss layout
+      failures
 
-v1 daily-wage convention: `basic_monthly ÷ 30`. The alternative
-(`basic × 12 ÷ 365`) is recorded in the rule's `review_notes` — the provenance
-mechanism surfacing a genuine ambiguity rather than burying it.
+**DoD:** Three PDFs, opened and read by a human. Arabic is RTL. Malayalam
+conjuncts render.
 
-- [ ] **Step 1: Write the failing test**
+---
+
+## T2.6 — Provenance pages
+
+**Files:** `backend/src/bayyina/api/routes_provenance.py`, `frontend/src/components/Provenance.tsx`
+
+- [ ] Render encoded logic beside the verbatim clause, with the official link,
+      signature and approval status
+- [ ] Test that an unknown rule returns 404 and that the page shows `provisional`
+
+**DoD:** A lawyer who has never seen the codebase can verify an encoding against
+source in under a minute. **Time this with a real person.**
+
+---
+
+## T2.7 — Web checker v2
+
+- [ ] Full flow: property details → automatic comparable → verdict → pack download
+- [ ] Render the `HUMAN_REVIEW_REQUIRED` state properly — **it is a feature, not
+      an error page**
+- [ ] Language switcher for all three languages
+
+**DoD:** The complete Mode A journey works without a phone call.
+
+---
+
+## T2.8 — Comprehension test ⚠ CUSTOMER GATE
+
+**No code. This is the customer-first gate.**
+
+- [ ] Give the Malayalam pack to someone who reads Malayalam and **not** English.
+      Ask them: what is the answer, and what do you do next?
+- [ ] Repeat for Arabic
+- [ ] Record every point of confusion and fix the templates
+
+**DoD:** Two non-English readers correctly state the verdict and the next step
+without help. **If they cannot, the product does not work — regardless of what the
+tests say.**
+
+---
+
+## T2.9 — Case store, migrations, correlation · Track A
+
+**Files:** `src/bayyina/store/{db,migrations,cases,consent,deadlines}.py`,
+`migrations/001_initial.sql`
+**Test:** `tests/store/test_{migrations,cases,consent}.py`
+
+**This was missing from the earlier plan.** `consent.py` and `deadlines.py` were
+listed in the file structure with nothing creating the storage they depend on.
+
+**Interfaces produced:**
+- `get_db()` — SQLite connection with `journal_mode=WAL` and a busy timeout
+- `run_migrations(db)` — forward-only, numbered, idempotent
+- `Cases.create(pack, call_id) -> Case` with `status="awaiting_review"`
+- `Consent.record(call_id, granted)` · `Consent.opt_out(call_id)` · `Consent.has(call_id)`
+- `Deadlines.arm(case_id, due, rule_id)`
+
+Tables: `cases`, `evidence_packs`, `deadlines`, `consent`, `audit`, `idempotency`.
+**Every table carries `call_id`** so one identifier threads the whole journey.
+
+- [ ] **Write the failing tests**
 
 ```python
-# tests/rules_logic/test_gratuity.py
-from datetime import date
-from decimal import Decimal
+# tests/store/test_migrations.py
+def test_migrations_are_idempotent(tmp_path):
+    """Running twice must not fail or duplicate."""
+    db = get_db(tmp_path / "t.db")
+    run_migrations(db)
+    run_migrations(db)
+    assert table_exists(db, "cases")
 
+
+def test_wal_mode_is_enabled(tmp_path):
+    """Default journal mode locks under concurrent calls."""
+    db = get_db(tmp_path / "t.db")
+    assert db.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
+```
+
+```python
+# tests/store/test_consent.py
 import pytest
-
-from bayyina.rules_logic.gratuity import evaluate
-
-SALARY = Decimal("9000")     # daily wage = 300
+from bayyina.store.consent import Consent, NoConsentError
 
 
-def test_under_one_year_has_no_entitlement():
-    r = evaluate(SALARY, date(2025, 1, 1), date(2025, 9, 1))
-    assert r.verdict == "no_entitlement"
-    assert r.gratuity_amount == Decimal("0.00")
+def test_opt_out_is_irreversible(db):
+    Consent(db).record("call-1", granted=True)
+    Consent(db).opt_out("call-1")
+    Consent(db).record("call-1", granted=True)  # attempt to re-grant
+    assert Consent(db).has("call-1") is False
 
 
-def test_exactly_one_year_gives_twenty_one_days():
-    r = evaluate(SALARY, date(2025, 1, 1), date(2026, 1, 1))
-    assert r.entitled_days == pytest.approx(21.0, abs=0.2)
-    assert r.gratuity_amount == pytest.approx(Decimal("6300"), abs=Decimal("60"))
-
-
-def test_three_years_scales_linearly():
-    r = evaluate(SALARY, date(2023, 1, 1), date(2026, 1, 1))
-    assert r.entitled_days == pytest.approx(63.0, abs=0.5)
-
-
-def test_beyond_five_years_uses_thirty_day_rate():
-    # 7 years -> 21*5 + 30*2 = 165 days
-    r = evaluate(SALARY, date(2019, 1, 1), date(2026, 1, 1))
-    assert r.entitled_days == pytest.approx(165.0, abs=1.0)
-
-
-def test_two_year_wage_cap_is_applied():
-    # 40 years of service would far exceed the cap of 24 months' salary
-    r = evaluate(SALARY, date(1986, 1, 1), date(2026, 1, 1))
-    assert r.cap_applied is True
-    assert r.gratuity_amount == Decimal("216000.00")   # 9000 * 24
-
-
-def test_unpaid_leave_reduces_service():
-    with_leave = evaluate(SALARY, date(2023, 1, 1), date(2026, 1, 1), 200)
-    without = evaluate(SALARY, date(2023, 1, 1), date(2026, 1, 1), 0)
-    assert with_leave.service_years < without.service_years
-
-
-def test_end_before_start_is_rejected():
-    with pytest.raises(ValueError):
-        evaluate(SALARY, date(2026, 1, 1), date(2025, 1, 1))
+def test_opt_out_is_written_to_the_audit_trail(db):
+    Consent(db).record("call-1", granted=True)
+    Consent(db).opt_out("call-1")
+    assert any(r["event"] == "opt_out" for r in audit_entries(db, "call-1"))
 ```
-
-- [ ] **Step 2: Run and confirm failure**
-
-Run: `pytest tests/rules_logic/test_gratuity.py -v`
-Expected: FAIL — `ModuleNotFoundError`
-
-- [ ] **Step 3: Implement**
 
 ```python
-# src/bayyina/rules_logic/gratuity.py
-from __future__ import annotations
+# tests/store/test_cases.py
+def test_no_agent_reachable_status_is_terminal(db, sample_pack):
+    """G4: the agent can never move a case to a decided state."""
+    from bayyina.store.cases import Cases, TERMINAL_STATUSES
 
-from dataclasses import dataclass
-from datetime import date
-from decimal import ROUND_HALF_UP, Decimal
-
-_CENTS = Decimal("0.01")
-_DAYS_PER_YEAR = 365.0
-_FIRST_TIER_YEARS = 5.0
-_FIRST_TIER_DAYS = 21.0
-_SECOND_TIER_DAYS = 30.0
-_CAP_MONTHS = 24
-
-
-@dataclass(frozen=True)
-class GratuityResult:
-    verdict: str
-    service_years: float
-    entitled_days: float
-    daily_wage: Decimal
-    gratuity_amount: Decimal
-    cap_applied: bool
-
-
-def evaluate(
-    basic_monthly_salary: Decimal,
-    start: date,
-    end: date,
-    unpaid_leave_days: int = 0,
-) -> GratuityResult:
-    if end < start:
-        raise ValueError("end date precedes start date")
-    if basic_monthly_salary <= 0:
-        raise ValueError("basic_monthly_salary must be positive")
-
-    service_days = (end - start).days - unpaid_leave_days
-    service_years = max(0.0, service_days / _DAYS_PER_YEAR)
-    daily_wage = (basic_monthly_salary / Decimal("30")).quantize(
-        _CENTS, rounding=ROUND_HALF_UP
-    )
-
-    if service_years < 1.0:
-        return GratuityResult(
-            verdict="no_entitlement",
-            service_years=service_years,
-            entitled_days=0.0,
-            daily_wage=daily_wage,
-            gratuity_amount=Decimal("0.00"),
-            cap_applied=False,
-        )
-
-    if service_years <= _FIRST_TIER_YEARS:
-        entitled_days = _FIRST_TIER_DAYS * service_years
-    else:
-        entitled_days = _FIRST_TIER_DAYS * _FIRST_TIER_YEARS + _SECOND_TIER_DAYS * (
-            service_years - _FIRST_TIER_YEARS
-        )
-
-    raw = daily_wage * Decimal(str(entitled_days))
-    cap = basic_monthly_salary * _CAP_MONTHS
-    cap_applied = raw > cap
-    amount = (cap if cap_applied else raw).quantize(_CENTS, rounding=ROUND_HALF_UP)
-
-    return GratuityResult(
-        verdict="entitled",
-        service_years=service_years,
-        entitled_days=entitled_days,
-        daily_wage=daily_wage,
-        gratuity_amount=amount,
-        cap_applied=cap_applied,
-    )
+    case = Cases(db).create(sample_pack, call_id="call-1")
+    assert case.status not in TERMINAL_STATUSES
 ```
 
-- [ ] **Step 4: Run and confirm all tests pass**
+- [ ] **Run, confirm failure**
+- [ ] **Implement.** `TERMINAL_STATUSES = frozenset({"approved", "rejected",
+      "amended"})` — set only through the officer interface. `Cases.create()` has
+      no parameter that can produce one
+- [ ] **Run, confirm pass**
 
-Run: `pytest tests/rules_logic/test_gratuity.py -v`
-Expected: 7 passed
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add src/bayyina/rules_logic/gratuity.py tests/rules_logic/test_gratuity.py
-git commit -m "feat: Art.51 end-of-service gratuity evaluation"
-```
+**DoD:** Opt-out is irreversible and proven by test. WAL is on. Migrations run
+twice without error. G4 is asserted, not assumed.
 
 ---
 
-## Task 8: Evaluator and evaluation record
+## T2.10 — Failure taxonomy and tool behaviour ⚠ VOICE-CRITICAL · Track A
 
-**Files:**
-- Create: `src/bayyina/registry/evaluator.py`, `src/bayyina/evaluation_log.py`
-- Test: `tests/registry/test_evaluator.py`, `tests/test_evaluation_log.py`
+**Files:** `src/bayyina/api/errors.py`, `agent/scripts/*/failures.md`
+**Test:** `tests/api/test_failures.py`
 
-**Interfaces:**
-- Consumes: `load_rules`, the three `rules_logic` modules.
-- Produces: `Evaluator(rules: dict[str, Rule])` with
-  `evaluate(rule_id: str, inputs: dict, input_sources: dict) -> EvaluationRecord`.
-  `EvaluationRecord` is a Pydantic model matching
-  [ARCHITECTURE.md](docs/ARCHITECTURE.md) §5.3, always carrying a non-null
-  `citation` and a `review_status` copied from the rule's approval status.
-- Produces: `EvaluationLog.append(record) -> None`, `EvaluationLog.get(eval_id)`.
+**A webhook that hangs during a live call produces dead air, and the caller hangs
+up.** Every tool needs a defined failure behaviour and a line for the agent to say.
 
-- [ ] **Step 1: Write the failing tests**
+- [ ] Define the taxonomy, and for each: HTTP status, agent behaviour, spoken line
 
-```python
-# tests/registry/test_evaluator.py
-from decimal import Decimal
+| Failure | Status | The agent says |
+|---|---|---|
+| Comparable not found | 200, `insufficient_data` | The G5 thin-data script — not an error |
+| Rule evaluation error | 500 | *"Something went wrong on my side. I'm not going to guess at your answer — let me pass you to someone."* |
+| Timeout (> 3 s) | — | Filler line, then one retry, then escalate |
+| SMS dispatch failed | 502 | *"I couldn't text that through. I can read out the key points, or try another number."* |
+| Corpus unsigned at boot | — | Service does not start. No call is answered |
 
-import pytest
+- [ ] Add explicit timeouts to every outbound call
+- [ ] Add `Idempotency-Key` to `/evidence-pack`, `/dispatch` and `/deadline`;
+      **test that a replayed key returns the prior result rather than acting twice**
+- [ ] Add rate limiting to public endpoints
+- [ ] Write the failure lines into the T0.6 script set, in all three languages
 
-from bayyina.registry.evaluator import Evaluator, UnknownRuleError
-
-
-def test_verdict_always_carries_a_citation(signed_rules):
-    rec = Evaluator(signed_rules).evaluate(
-        "rent_increase.dubai.decree_43_2013",
-        {"current_annual_rent": Decimal("85000"),
-         "market_average_rent": Decimal("91000"),
-         "proposed_annual_rent": Decimal("102000")},
-        {"market_average_rent": "dld_open_rent_contracts_derived"},
-    )
-    assert rec.citation.clause == "Article 1"
-    assert rec.verdict == "not_permitted"
-
-
-def test_review_status_is_carried_from_the_rule(signed_rules):
-    rec = Evaluator(signed_rules).evaluate(
-        "rent_increase.dubai.decree_43_2013",
-        {"current_annual_rent": Decimal("85000"),
-         "market_average_rent": Decimal("91000"),
-         "proposed_annual_rent": Decimal("102000")},
-        {"market_average_rent": "dld_open_rent_contracts_derived"},
-    )
-    assert rec.review_status == "provisional"
-
-
-def test_unknown_rule_raises(signed_rules):
-    with pytest.raises(UnknownRuleError):
-        Evaluator(signed_rules).evaluate("nope", {}, {})
-```
-
-Add a `signed_rules` fixture in `tests/conftest.py` that signs and loads the three
-real YAML files from `rules/` (written in Task 10) — so this test exercises the
-production corpus, not a stub.
-
-- [ ] **Step 2: Run and confirm failure**
-
-Run: `pytest tests/registry/test_evaluator.py -v`
-Expected: FAIL — `ModuleNotFoundError: bayyina.registry.evaluator`
-
-- [ ] **Step 3: Implement the evaluator, dispatching on `rule.logic`**
-
-Dispatch table `{"banded_percentage": ..., "notice_period": ..., "gratuity": ...}`.
-Build an `EvaluationRecord` with `eval_id` (uuid4, `ev_` prefix), `rule_id`,
-`rule_version`, `rule_signature`, `inputs`, `input_sources`, `verdict`,
-`computed`, `citation` (from `rule.source`), `confidence`, `review_status`
-(from `rule.approval.status`), `created_at` (UTC now).
-
-- [ ] **Step 4: Run and confirm the tests pass**
-
-Run: `pytest tests/registry -v`
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add src/bayyina/registry/evaluator.py src/bayyina/evaluation_log.py tests
-git commit -m "feat: evaluator dispatch and immutable evaluation records"
-```
+**DoD:** Every tool has a tested failure path and a spoken line. **A replayed
+dispatch sends one SMS, proven by test.** No failure produces silence.
 
 ---
 
-## Task 9: Write and sign the three rule files
+## T2.11 — README and API documentation · Track D
 
-**Files:**
-- Create: `rules/rent_increase.dubai.decree_43_2013.v1.yaml`,
-  `rules/notice_validity.dubai.law_26_2007_a14.v1.yaml`,
-  `rules/gratuity.uae.decree_33_2021_a51.v1.yaml`
-- Create: `scripts/sign_rule.py`
-- Test: `tests/test_corpus.py`
+**Files:** `README.md`
 
-- [ ] **Step 1: Write the failing test**
+Written now, not in the final week. It is a **Stage 2 deliverable** and it is also
+how a judge forms their first impression of the engineering.
 
-```python
-# tests/test_corpus.py
-from pathlib import Path
+- [ ] Write `README.md`: what it is, the one sentence, quickstart from
+      `.env.example`, architecture in one diagram, the guardrail table, how to
+      sign a rule, how to run the tests, the latency budget as a stated commitment
+- [ ] Curate the FastAPI OpenAPI output — every endpoint gets a description and an
+      example
+- [ ] **Include the tamper demo as a documented, reproducible procedure** — a
+      reader must be able to run the wow moment themselves in three commands
 
-from bayyina.registry.loader import load_rules
-
-RULES_DIR = Path(__file__).resolve().parents[1] / "rules"
-
-
-def test_production_corpus_loads():
-    rules = load_rules(RULES_DIR)
-    assert set(rules) == {
-        "rent_increase.dubai.decree_43_2013",
-        "notice_validity.dubai.law_26_2007_a14",
-        "gratuity.uae.decree_33_2021_a51",
-    }
-
-
-def test_every_rule_has_a_verbatim_source_clause():
-    for rule in load_rules(RULES_DIR).values():
-        assert rule.source.clause
-        assert rule.source.verbatim.strip()
-        assert rule.source.url.startswith("https://")
-```
-
-- [ ] **Step 2: Run and confirm failure**
-
-Run: `pytest tests/test_corpus.py -v`
-Expected: FAIL — the `rules/` directory is empty
-
-- [ ] **Step 3: Write the three YAML files**
-
-Use the full worked example in [ARCHITECTURE.md](docs/ARCHITECTURE.md) §5.1 for
-the rent rule. Set `approval.status: provisional` and `approved_by` to the team
-name for all three — **we are provisional until a reviewer is appointed, and the
-agent discloses this aloud.** Record the gratuity daily-wage ambiguity in
-`review_notes`.
-
-- [ ] **Step 4: Write the signing script and sign all three**
-
-```python
-# scripts/sign_rule.py
-"""Sign a rule file in place. Usage: python scripts/sign_rule.py rules/<file>.yaml"""
-import sys
-from datetime import datetime, timezone
-from pathlib import Path
-
-import yaml
-
-from bayyina.registry.schema import Rule
-from bayyina.registry.signing import rule_digest
-
-path = Path(sys.argv[1])
-data = yaml.safe_load(path.read_text("utf-8"))
-data["approval"]["approved_at"] = datetime.now(timezone.utc).isoformat()
-data["approval"]["signature"] = None
-data["approval"]["signature"] = rule_digest(Rule.model_validate(data))
-path.write_text(yaml.safe_dump(data, sort_keys=False, allow_unicode=True), "utf-8")
-print(f"signed {data['id']} v{data['version']} -> {data['approval']['signature']}")
-```
-
-Run it for each of the three files.
-
-- [ ] **Step 5: Run the corpus tests and confirm they pass**
-
-Run: `pytest tests/test_corpus.py -v`
-Expected: 2 passed
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add rules scripts tests/test_corpus.py
-git commit -m "feat: sign the three v1 rules as provisional"
-```
+**DoD:** A stranger clones the repo and has it running from the README alone. The
+tamper demo is reproducible from the documentation.
 
 ---
 
-## Task 10: Market comparables from Dubai Pulse
+# PHASE 3 · Voice
 
-**Files:**
-- Create: `src/bayyina/market/__init__.py`, `src/bayyina/market/ingest.py`,
-  `src/bayyina/market/comparables.py`
-- Test: `tests/market/test_comparables.py`
+**3a (23–30 Sep)** runs on the free tier while awaiting the shortlist.
+**3b (30 Sep–10 Oct)** is the build sprint.
 
-**Interfaces:**
-- Produces: `ingest_csv(csv_path: Path, db_path: Path) -> int` returning row count.
-- Produces: `Comparables(db_path).median_rent(area: str, property_type: str,
-  bedrooms: int, window_days: int = 365) -> ComparableResult` with
-  `median_annual_rent: Decimal | None`, `contract_count: int`,
-  `confidence: float`, `status: str`, `snapshot_id: str`.
+- [ ] **T3.1** Agent workflow skeleton in English: greet, disclose, triage, one
+      slot-fill path. Proves the webhook tool contract before the sprint clock starts
+- [ ] **T3.2** All seven webhook tools wired and contract-tested
+- [ ] **T3.3** `guardrails/triage.py` — G2 interpretive classifier and G6 distress
+      detection, against a labelled set of **≥ 60 utterances per language, both
+      classes**. Report precision and recall, not accuracy
+- [ ] **T3.4** Slot-fill in **four turns** with one batched readback (T0.6 scripts)
+- [ ] **T3.5** Pack dispatch by SMS **during the call**. Delivery to the calling
+      number requires no OTP; a different number does
+- [ ] **T3.6** Arabic and Malayalam, including mid-call language switching
+- [ ] **T3.7** Deadline arming with opt-in and irreversible opt-out (G8)
+- [ ] **T3.8** **Measure end-to-end latency against the budget.** Report p50/p95
+      for first audio. If p95 exceeds 1.5 s, fix before adding features
 
-**Guardrail G5 lives here.** Fewer than 30 contracts → reduced confidence; fewer
-than 10 → `status = "insufficient_data"` and `median_annual_rent = None`, and the
-agent must ask for the Ejari number rather than answer.
-
-- [ ] **Step 1: Write the failing test**
-
-```python
-# tests/market/test_comparables.py
-from decimal import Decimal
-
-from bayyina.market.comparables import Comparables
-
-
-def test_returns_median_for_a_well_populated_comparable(seeded_db):
-    r = Comparables(seeded_db).median_rent("Al Barsha", "Flat", 2)
-    assert r.status == "ok"
-    assert r.median_annual_rent == Decimal("85000")
-    assert r.contract_count >= 30
-
-
-def test_insufficient_data_returns_no_number(seeded_db):
-    r = Comparables(seeded_db).median_rent("Nowhere", "Villa", 9)
-    assert r.status == "insufficient_data"
-    assert r.median_annual_rent is None
-
-
-def test_thin_comparable_reduces_confidence(seeded_db):
-    thin = Comparables(seeded_db).median_rent("Thin Area", "Flat", 1)
-    thick = Comparables(seeded_db).median_rent("Al Barsha", "Flat", 2)
-    assert thin.confidence < thick.confidence
-    assert thin.status == "ok"
-
-
-def test_snapshot_id_is_recorded(seeded_db):
-    assert Comparables(seeded_db).median_rent("Al Barsha", "Flat", 2).snapshot_id
-```
-
-Add a `seeded_db` fixture in `tests/market/conftest.py` creating a temporary
-DuckDB with 40 Al Barsha 2-bed contracts around AED 85,000, 12 "Thin Area" 1-bed
-contracts, and nothing for "Nowhere".
-
-- [ ] **Step 2: Run and confirm failure**
-
-Run: `pytest tests/market/test_comparables.py -v`
-
-- [ ] **Step 3: Implement ingest and comparables**
-
-`ingest.py` reads the Dubai Pulse CSV into DuckDB with
-`CREATE TABLE rent_contracts AS SELECT * FROM read_csv_auto(...)`, normalising
-area, property type, bedrooms, annual rent and contract start date. Record a
-`snapshots` row with `snapshot_id`, `computed_at`, `source`, `row_count`.
-
-- [ ] **Step 4: Run and confirm the tests pass**
-
-Run: `pytest tests/market -v`
-
-- [ ] **Step 5: Run the real ingest and record the row count**
-
-Run: `python -m bayyina.market.ingest data/raw/dld_rent_contracts.csv data/rent_contracts.duckdb`
-Record the actual row count in `docs/CANVAS.md` box D — **this is a sourced
-baseline figure.**
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add src/bayyina/market tests/market
-git commit -m "feat: Dubai Pulse ingest and comparable medians with G5 thresholds"
-```
+**DoD for Phase 3:** A live number runs the full journey in three languages, and
+measured latency is recorded against the published budget.
 
 ---
 
-## Task 11: API — evaluate, comparables, health
+# PHASE 4 · Evidence, Demo, Hardening
 
-**Files:**
-- Create: `src/bayyina/api/__init__.py`, `src/bayyina/api/app.py`,
-  `src/bayyina/api/routes_evaluate.py`, `src/bayyina/guardrails/tokens.py`
-- Test: `tests/api/test_evaluate.py`
+- [ ] **T4.1** Agent Testing suites: primary flow, multi-run pass rates
+- [ ] **T4.2** Adversarial suites — advice-seeking, contradictory numbers,
+      mid-call language switch, distress, opt-out, thin data
+- [ ] **T4.3** **The tamper demo, scripted and rehearsed.** Edit one digit,
+      restart, service refuses to boot. Rehearse until it is reliable
+- [ ] **T4.4** Demo recording, **built to pitch standard** — the team cannot
+      travel, so this recording is the pitch
+- [ ] **T4.5** Final pass on the T2.11 README with real numbers filled in; export
+      the one-page architecture diagram
+- [ ] **T4.6** Observability: latency percentiles, abandonment rate, resolution
+      state mix, cost per call. **Measure cost per call and record it**
 
-**Interfaces:**
-- Consumes: `Evaluator`, `Comparables`, `load_rules`.
-- Produces: FastAPI app. `POST /evaluate`, `GET /comparables`, `GET /rules`,
-  `GET /healthz`.
-- Produces: `issue_token(payload: dict) -> str`, `verify_token(token, payload) -> bool`.
-
-**Guardrails G3 and G7 are tested here.**
-
-- [ ] **Step 1: Write the failing test**
-
-```python
-# tests/api/test_evaluate.py
-from fastapi.testclient import TestClient
-
-from bayyina.api.app import create_app
-
-client = TestClient(create_app())
-
-
-def _payload(**over):
-    return {"rule_id": "rent_increase.dubai.decree_43_2013",
-            "inputs": {"current_annual_rent": "85000",
-                       "market_average_rent": "91000",
-                       "proposed_annual_rent": "102000"},
-            "confirmation_token": None, **over}
-
-
-def test_evaluate_rejects_missing_confirmation_token():
-    assert client.post("/evaluate", json=_payload()).status_code == 422
-
-
-def test_evaluate_returns_verdict_with_citation():
-    token = client.post("/agent/confirm",
-                        json={"slots": _payload()["inputs"]}).json()["token"]
-    body = client.post("/evaluate", json=_payload(confirmation_token=token)).json()
-    assert body["verdict"] == "not_permitted"
-    assert body["citation"]["clause"] == "Article 1"
-    assert body["review_status"] == "provisional"
-
-
-def test_healthz_reports_corpus_signature_state():
-    body = client.get("/healthz").json()
-    assert body["corpus_signed"] is True
-    assert body["rule_count"] == 3
-```
-
-- [ ] **Step 2: Run and confirm failure**
-
-Run: `pytest tests/api/test_evaluate.py -v`
-
-- [ ] **Step 3: Implement**
-
-`create_app()` calls `load_rules(RULES_DIR)` at startup — **an unsigned corpus
-raises `UnsignedRuleError` and the app does not start (G7)**. `/evaluate` requires
-a non-null `confirmation_token` validated against the submitted slots (G3).
-
-- [ ] **Step 4: Run and confirm the tests pass**
-
-Run: `pytest tests/api -v`
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add src/bayyina/api src/bayyina/guardrails tests/api
-git commit -m "feat: evaluate API with G3 token gate and G7 boot check"
-```
+**DoD:** Every Stage 2 deliverable exists. Latency, abandonment and cost are
+measured numbers, not estimates.
 
 ---
 
-## Task 12: Provenance pages
+## Risk Register
 
-**Files:**
-- Create: `src/bayyina/api/routes_provenance.py`, `web/templates/provenance.html`
-- Test: `tests/api/test_provenance.py`
-
-Renders encoded logic beside the verbatim source clause, with the official link
-and the signature. **This is how verifiability replaces authority** — see
-[DESIGN.md](docs/DESIGN.md) §9.
-
-- [ ] **Step 1: Write the failing test**
-
-```python
-# tests/api/test_provenance.py
-from fastapi.testclient import TestClient
-from bayyina.api.app import create_app
-
-client = TestClient(create_app())
-
-
-def test_provenance_page_shows_clause_and_signature():
-    html = client.get("/provenance/rent_increase.dubai.decree_43_2013").text
-    assert "Article 1" in html
-    assert "sha256:" in html
-    assert "provisional" in html.lower()
-
-
-def test_unknown_rule_returns_404():
-    assert client.get("/provenance/nope").status_code == 404
-```
-
-- [ ] **Step 2: Run and confirm failure**
-- [ ] **Step 3: Implement the route and Jinja template**
-- [ ] **Step 4: Run and confirm the tests pass**
-- [ ] **Step 5: Commit**
-
-```bash
-git commit -am "feat: public rule provenance pages"
-```
+| Risk | Trigger to watch | Response |
+|---|---|---|
+| Dubai Pulse access delayed | No credentials by 12 Sep | Bulk CSV path (already parallel in T0.3) |
+| Latency budget missed | T2.2 lookup > 20 ms | Reduce aggregate granularity; cache hot areas in memory |
+| Data quality poor | T2.1 rejection rate > 5% | Stop. Investigate before building on it |
+| Malayalam rendering fails | T2.5 `.notdef` glyphs | Substitute font; if unresolvable, drop to Hindi and say so |
+| Comprehension test fails | T2.8 | **Blocking.** Rewrite templates before Phase 3 |
+| No shortlist on 30 Sep | — | Product still ships. Mode A is independent of the competition |
+| Canvas rejects tables | T0.2 answer | Reformat D, I, J as prose. Cheap if known early |
 
 ---
 
-## Task 12A: Evidence pack assembly
+## Self-Review
 
-**Files:**
-- Create: `src/bayyina/actions/__init__.py`, `src/bayyina/actions/evidence_pack.py`
-- Test: `tests/actions/test_evidence_pack.py`
+Checked against DESIGN.md and ARCHITECTURE.md on 2026-09-09.
 
-**Interfaces:**
-- Consumes: `EvaluationRecord` from Task 8.
-- Produces: `build_pack(records: list[EvaluationRecord], caller_ref: str) -> EvidencePack`
-  with `pack_id`, `caller_ref`, `grounds: list[str]`, `evaluations`, `rule_versions`,
-  `signatures`, `market_snapshot`, `generated_at`, `render_text() -> str`.
+**Guardrail coverage — all ten have an implementing task:**
 
-**This is action-layer step 2** — the agent stops answering and starts producing.
-
-- [ ] **Step 1: Write the failing test**
-
-```python
-# tests/actions/test_evidence_pack.py
-import pytest
-
-from bayyina.actions.evidence_pack import build_pack
-
-
-def test_pack_carries_every_rule_version_and_signature(rent_eval, notice_eval):
-    pack = build_pack([rent_eval, notice_eval], caller_ref="ejari:12345")
-    assert set(pack.rule_versions) == {
-        "rent_increase.dubai.decree_43_2013",
-        "notice_validity.dubai.law_26_2007_a14",
-    }
-    assert all(s.startswith("sha256:") for s in pack.signatures.values())
-
-
-def test_pack_lists_each_independent_ground(rent_eval, notice_eval):
-    pack = build_pack([rent_eval, notice_eval], caller_ref="ejari:12345")
-    assert len(pack.grounds) == 2
-
-
-def test_pack_refuses_to_build_with_no_adverse_finding(permitted_eval):
-    with pytest.raises(ValueError):
-        build_pack([permitted_eval], caller_ref="ejari:12345")
-
-
-def test_rendered_pack_cites_every_clause(rent_eval, notice_eval):
-    text = build_pack([rent_eval, notice_eval], "ejari:12345").render_text()
-    assert "Article 1" in text
-    assert "Article 14" in text
-```
-
-Add fixtures in `tests/actions/conftest.py` producing a `not_permitted` rent
-evaluation, an `invalid` notice evaluation, and a `permitted` rent evaluation.
-
-- [ ] **Step 2: Run and confirm failure**
-
-Run: `pytest tests/actions/test_evidence_pack.py -v`
-Expected: FAIL — `ModuleNotFoundError: bayyina.actions.evidence_pack`
-
-- [ ] **Step 3: Implement**
-
-`build_pack` raises `ValueError` when no evaluation carries an adverse verdict —
-**we never assemble a case that the rules do not support.** `render_text()`
-produces the plain-text filing body, quoting each clause and its rule signature.
-
-- [ ] **Step 4: Run and confirm the tests pass**
-
-Run: `pytest tests/actions -v`
-Expected: 4 passed
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add src/bayyina/actions tests/actions
-git commit -m "feat: evidence pack assembly from evaluation records"
-```
-
----
-
-## Task 12B: Lodge to the officer review queue — guardrail G4
-
-**Files:**
-- Create: `src/bayyina/actions/review_queue.py`, `src/bayyina/api/routes_filing.py`
-- Test: `tests/actions/test_review_queue.py`, `tests/api/test_filing.py`
-
-**Interfaces:**
-- Consumes: `EvidencePack`, `verify_token` from Task 11.
-- Produces: `lodge(pack: EvidencePack, confirmation_token: str) -> QueuedCase`
-  with `case_id`, `status="awaiting_officer_review"`, `lodged_at`, `pack_id`.
-- Raises `MissingConfirmationError` when the token is absent or does not match.
-
-**This is the human-in-the-loop enforcement.** There must be no code path that
-files directly, and the test suite proves it.
-
-- [ ] **Step 1: Write the failing test**
-
-```python
-# tests/actions/test_review_queue.py
-import pytest
-
-from bayyina.actions.review_queue import (
-    lodge, MissingConfirmationError, QUEUE_TERMINAL_STATUSES,
-)
-
-
-def test_lodging_without_a_token_is_refused(sample_pack):
-    with pytest.raises(MissingConfirmationError):
-        lodge(sample_pack, confirmation_token=None)
-
-
-def test_lodging_with_a_mismatched_token_is_refused(sample_pack):
-    with pytest.raises(MissingConfirmationError):
-        lodge(sample_pack, confirmation_token="not-the-right-token")
-
-
-def test_lodged_case_awaits_an_officer(sample_pack, valid_token):
-    case = lodge(sample_pack, valid_token)
-    assert case.status == "awaiting_officer_review"
-
-
-def test_no_status_reachable_by_the_agent_is_terminal(sample_pack, valid_token):
-    """The agent can never move a case to a decided state."""
-    case = lodge(sample_pack, valid_token)
-    assert case.status not in QUEUE_TERMINAL_STATUSES
-```
-
-- [ ] **Step 2: Run and confirm failure**
-
-Run: `pytest tests/actions/test_review_queue.py -v`
-
-- [ ] **Step 3: Implement**
-
-`QUEUE_TERMINAL_STATUSES = frozenset({"approved", "rejected", "amended"})` — these
-are set only by an officer through the review interface. `lodge()` has no
-parameter that can produce them.
-
-- [ ] **Step 4: Run and confirm the tests pass**
-
-Run: `pytest tests/actions/test_review_queue.py tests/api/test_filing.py -v`
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add src/bayyina/actions/review_queue.py src/bayyina/api/routes_filing.py tests
-git commit -m "feat: G4 two-key lodging into the officer review queue"
-```
-
----
-
-## Task 12C: Deadlines and consent — guardrail G8
-
-**Files:**
-- Create: `src/bayyina/actions/deadlines.py`, `src/bayyina/guardrails/consent.py`
-- Test: `tests/actions/test_deadlines.py`, `tests/guardrails/test_consent.py`
-
-**Interfaces:**
-- Produces: `record_consent(call_id, granted: bool) -> ConsentRecord`;
-  `opt_out(call_id) -> None`; `has_consent(call_id) -> bool`.
-- Produces: `register_deadline(case_id, due: date, rule_id) -> Deadline`;
-  `schedule_callback(case_id, call_id, days_before: int) -> Callback`, which
-  raises `NoConsentError` when consent is absent or withdrawn.
-
-**This is what makes Bayyina a coordination product rather than a lookup.** A
-resident who learns on day 88 that they had 90 days has learned nothing useful.
-
-- [ ] **Step 1: Write the failing test**
-
-```python
-# tests/actions/test_deadlines.py
-from datetime import date
-
-import pytest
-
-from bayyina.actions.deadlines import schedule_callback, register_deadline
-from bayyina.guardrails.consent import record_consent, opt_out, NoConsentError
-
-
-def test_callback_requires_consent():
-    register_deadline("case-1", date(2026, 4, 1), "notice_validity.dubai.law_26_2007_a14")
-    with pytest.raises(NoConsentError):
-        schedule_callback("case-1", call_id="call-1", days_before=7)
-
-
-def test_callback_scheduled_when_consent_recorded():
-    record_consent("call-2", granted=True)
-    register_deadline("case-2", date(2026, 4, 1), "notice_validity.dubai.law_26_2007_a14")
-    cb = schedule_callback("case-2", call_id="call-2", days_before=7)
-    assert cb.scheduled_for == date(2026, 3, 25)
-
-
-def test_opt_out_blocks_all_future_callbacks():
-    record_consent("call-3", granted=True)
-    opt_out("call-3")
-    register_deadline("case-3", date(2026, 4, 1), "notice_validity.dubai.law_26_2007_a14")
-    with pytest.raises(NoConsentError):
-        schedule_callback("case-3", call_id="call-3", days_before=7)
-
-
-def test_opt_out_is_recorded_in_the_audit_trail(audit_log):
-    record_consent("call-4", granted=True)
-    opt_out("call-4")
-    assert any(e["event"] == "opt_out" for e in audit_log.entries("call-4"))
-```
-
-- [ ] **Step 2: Run and confirm failure**
-
-Run: `pytest tests/actions/test_deadlines.py tests/guardrails/test_consent.py -v`
-
-- [ ] **Step 3: Implement.** `opt_out` writes a suppression record that
-      `has_consent` always honours — withdrawal is irreversible within a call.
-
-- [ ] **Step 4: Run and confirm the tests pass**
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add src/bayyina/actions/deadlines.py src/bayyina/guardrails/consent.py tests
-git commit -m "feat: G8 deadline tracking with consent-gated callbacks"
-```
-
----
-
-## Task 13: Public web checker
-
-**Files:**
-- Create: `web/index.html`, `web/checker.js`, `web/style.css`
-- Modify: `src/bayyina/api/app.py` — mount static files
-
-Two forms — rent increase and gratuity — calling `/comparables` and `/evaluate`.
-Every result displays the verdict, the computed values, the cited clause with a
-link to `/provenance/{rule_id}`, the market-average source, and the
-`review_status: provisional` notice.
-
-- [ ] **Step 1: Build the two forms and wire them to the API**
-- [ ] **Step 2: Verify manually against three known cases** — a permitted
-      increase, a refused increase, and an `insufficient_data` comparable
-- [ ] **Step 3: Commit**
-
----
-
-## Task 14: Deploy — this is Box N
-
-**Files:**
-- Create: `Dockerfile`, `.dockerignore`
-
-- [ ] **Step 1: Write the Dockerfile** — Python 3.11 slim, install the package,
-      copy `rules/`, `web/` and the built `data/rent_contracts.duckdb`, run uvicorn
-- [ ] **Step 2: Deploy to a public host** (Railway, Render or Fly.io free tier)
-- [ ] **Step 3: Verify `/healthz` reports `corpus_signed: true` in production**
-- [ ] **Step 4: Record the live URL in `docs/CANVAS.md` box N**
-- [ ] **Step 5: Commit**
-
-```bash
-git commit -am "feat: containerised deployment; box N link live"
-```
-
----
-
-## Task 15: Complete and submit the canvas
-
-- [ ] **Step 1: Fill boxes A and M** with team details
-- [ ] **Step 2: Fill box N** with the live URL and repository link
-- [ ] **Step 3: Re-check the D↔J cross-reference** — every KPI in J measured
-      against a figure that appears in D. Fix any drift
-- [ ] **Step 4: Trim every box to its recorded word limit.** Text beyond the
-      limit is not assessed — trim deliberately rather than letting it be cut
-- [ ] **Step 5: Transcribe into the official template and submit before 23 September**
-- [ ] **Step 6: Commit the final text**
-
-```bash
-git commit -am "docs: canvas submitted"
-```
-
----
-
-# PHASE 2 · 23–30 September · Build while waiting
-
-Shortlist is announced 30 September. Do not idle for a week.
-
-- [ ] **Task 16:** Build the agent skeleton on the ElevenLabs free tier — greet,
-      disclose, triage, one slot-fill flow, English and Arabic. Proves the webhook
-      tool contract works end to end before the sprint clock starts.
-- [ ] **Task 17:** Implement `guardrails/triage.py` — the answerable-vs-interpretive
-      classifier (G2) and distress detection (G6), with a labelled test set of at
-      least 60 utterances per language covering both classes.
-- [ ] **Task 18:** Write the Agent Testing suites **before** having the platform to
-      run them on: primary flow, advice-seeking caller, contradictory numbers,
-      mid-call language switch, distressed caller, and the filing-tool refusal
-      test.
-- [ ] **Task 19:** Storyboard the demo recording. It is built to pitch standard
-      from the start — **if the team cannot travel, this recording is the pitch.**
-- [ ] **Task 20:** Begin institutional outreach for a named pilot contact.
-
----
-
-# PHASE 3 · 30 September – 14 October · Build sprint
-
-Expanded into full TDD tasks on 30 September, once platform access lands. Planning
-these in false detail now would be fiction — the exact shape depends on the
-Workflows builder we have not yet used.
-
-**Deliverables, fixed now:**
-
-- [ ] Full six-node workflow with all seven guardrails enforced and demonstrable
-- [ ] Malayalam, Hindi and Urdu added to English and Arabic
-- [ ] Twilio telephony with a test number
-- [ ] UAE Pass consent handshake, stubbed against the real design
-- [ ] Agent Testing suites executed, multi-run pass rates recorded
-- [ ] Post-call webhooks writing transcript + evaluation record to the audit store
-- [ ] Demo recording: primary flow **through the full action layer** (check →
-      assemble → lodge → track → consented callback), plus **three** failure
-      paths: interpretive escalation, filing-tool refusal without a token, and
-      **the live tamper demo** — change one digit in the rent band table, restart,
-      and the service refuses to boot with `TamperedRuleError`
-      ([DESIGN.md](docs/DESIGN.md) §5.5)
-- [ ] One-page architecture diagram exported from ARCHITECTURE.md §2
-- [ ] `README.md` condensed from ARCHITECTURE.md
-- [ ] Submit by 14 October
-
----
-
-# PHASE 4 · 14–26 October
-
-- [ ] Harden against the failure modes the test suites surface
-- [ ] Convert the pilot conversation into a named contact for the Stage 2
-      "path to a named institutional pilot" criterion
-- [ ] Rehearse the pitch; confirm the remote-participation answer from Task 0
-- [ ] Appoint a reviewer if the mentor search succeeded, and move rule status from
-      `provisional` to `certified`
-
----
-
-## Self-Review Notes
-
-Checked against DESIGN.md and ARCHITECTURE.md on 2026-09-07, after the action-layer
-revision.
-
-**Guardrail coverage — all nine have an implementing task:**
-
-| Guardrail | Task |
+| Guardrail | Implementing task |
 |---|---|
-| G1 citation-or-silence | Task 8 (citation mandatory in the record) |
-| G2 interpretive tripwire | Task 17 |
-| G3 confidence floor | Task 11 |
-| G4 two-key filing | **Task 12B** — moved into Phase 1 |
-| G5 stale / thin data | Task 10 |
-| G6 distress detection | Task 17 |
-| G7 unsigned-rule refusal | Task 4 |
-| G8 consent and opt-out | **Task 12C** |
-| G9 auditable lineage | Task 8 + Task 12C |
+| G1 citation-or-silence | T1.5 — citation non-nullable on the record type |
+| G2 interpretive tripwire | T3.3 — classifier with precision/recall reported |
+| G3 confirmed data only | T3.4 — batched readback issues the token |
+| G4 never submits | Not implemented **by design**; asserted by test in T3.2 |
+| G5 insufficient data | T1.5 — the rule is not run below threshold, and the record type refuses a figure. T2.3 supplies the real contract counts |
+| G6 distress detection | T3.3 |
+| G7 unsigned-rule refusal | T1.2 loader + CI, and boot-time test in T1.7 |
+| G8 consent and opt-out | T3.7 |
+| G9 auditable lineage | T1.5 — hash-chained append-only audit, plus a required source per input |
+| G10 states, never argues | T2.4 — rejects non-records; verified by import inspection |
 
-**Action-layer coverage** ([DESIGN.md](docs/DESIGN.md) §5.3): check → Task 8;
-assemble → Task 12A; lodge → Task 12B; track and follow up → Task 12C. **All four
-now sit in Phase 1**, because criterion 2 of the Track 2 filter makes them the
-spine rather than a tail step. An earlier draft deferred filing to Phase 3; that
-was the weakness the qualification filter caught.
+**Customer journey coverage:** disclosure timing T0.6 · language recovery T0.6/T3.6
+· four-turn diagnosis T0.6/T3.4 · answer-first T0.6 · thin-data script T0.6/T2.3 ·
+pack in language T2.4/T2.5 · **comprehension verified T2.8** · deadline T3.7 ·
+escalation T3.3 · **failure never produces silence T2.10**.
 
-**Resolved:** the `ApprovalStatus` mismatch flagged in the previous review.
-ARCHITECTURE.md §5.2 now documents the three-state model
-(`unsigned`/`provisional`/`certified`) that the plan implements.
+**Discipline review — what each function added on the final pass:**
 
-**Type consistency:** `EvaluationRecord` (Task 8) is consumed by `build_pack`
-(12A); `EvidencePack` by `lodge` (12B); `case_id` by `register_deadline` (12C).
-`verify_token` is defined in Task 11 and reused in 12B. No orphan references.
+| Function | Gap found | Task |
+|---|---|---|
+| Backend | **No case store existed**, though `consent.py` and `deadlines.py` depended on one | T2.9 |
+| Backend | No failure taxonomy — a hung webhook meant dead air on a live call | T2.10 |
+| Backend | No idempotency; a platform retry would double-send SMS | T2.10 |
+| Backend | No secrets handling, no migrations, SQLite default journal mode locks | T0.9, T2.9 |
+| Frontend | RTL treated as a font problem when it is a layout problem | T2.0 |
+| Frontend | No visual identity — an unstyled page undermines a trust product | T2.0 |
+| Frontend | `HUMAN_REVIEW_REQUIRED` declared "a feature" but never designed | T2.0 |
+| PM | No parallelisation; no stated critical path | Workstreams |
+| PM | Canvas treated as a by-product rather than the Stage 1 deliverable | Track D |
+| PM | No decision log — settled questions would be re-litigated | T0.9 |
+| Docs | No glossary; four surfaces × three languages would drift | T0.8 |
+| Docs | README was a Stage 2 deliverable scheduled for the final week | T2.11 |
+
+**Type consistency:** `Rule` (T1.2) → `Evaluator` (T1.5) → `EvaluationRecord` →
+`build_pack` (T2.4) → `render` (T2.5). `Band` defined once in `registry/schema.py`
+and consumed by T1.3. No orphan references.
+
+**One documentation change to fold back:** ARCHITECTURE.md §7 places OTP
+verification before the verdict. T3.5 moves it — the pack goes to the calling
+number without OTP, since being on the call proves control of it, and OTP triggers
+only for delivery elsewhere. **This is less friction for no loss of safety.**
+Update ARCHITECTURE.md §7 and the API table before the canvas is finalised.
+
+**Known gap, accepted:** Phase 3 tasks carry deliverables and DoD but not TDD
+steps, because the ElevenLabs Workflows builder is not yet in hand. Expanding them
+into false detail now would be fiction. They expand on 30 September.
