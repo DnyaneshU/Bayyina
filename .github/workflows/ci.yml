@@ -90,23 +90,35 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - name: What the container says on boot
+        run: |
+          # Run in the foreground so a startup traceback is printed directly.
+          # Nothing is collapsed: a diagnostic inside a ::group:: is a diagnostic
+          # nobody reads, which is how the previous failure told us nothing.
+          echo "--- image entrypoint ---"
+          docker inspect -f '{{json .Config.Cmd}}' bayyina:ci
+          docker inspect -f 'user={{.Config.User}} workdir={{.Config.WorkingDir}}' bayyina:ci
+
+          echo "--- can the package even be imported? ---"
+          docker run --rm bayyina:ci python -c "import bayyina; print('bayyina', bayyina.__version__)" || true
+          docker run --rm bayyina:ci python -c "import uvicorn; print('uvicorn', uvicorn.__version__)" || true
+
+          echo "--- does the app build? ---"
+          docker run --rm bayyina:ci python -c "
+          from bayyina.api.app import create_app
+          app = create_app()
+          print('app built:', app.title, app.state.rule_count, 'rules')
+          " || true
+
+          echo "--- what is actually in the image? ---"
+          docker run --rm bayyina:ci sh -c 'ls -la /app && echo "--- rules ---" && ls -la /app/rules && echo "--- static ---" && ls -la /app/static | head' || true
+
+          echo "--- 10 seconds of uvicorn, in the foreground ---"
+          timeout 10 docker run --rm bayyina:ci 2>&1 | head -60 || true
+
       - name: The container serves a correct verdict
         run: |
           set -u
-
-          # Whatever happens after this, show what the container said. A failing
-          # smoke test with no logs is a failure you cannot act on.
-          dump() {
-            echo "::group::container logs"
-            docker logs bayyina 2>&1 || echo "(no container)"
-            echo "::endgroup::"
-            echo "::group::container state"
-            docker ps -a --filter name=bayyina || true
-            docker inspect -f '{{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}}' bayyina || true
-            echo "::endgroup::"
-          }
-          trap dump EXIT
-
           docker run -d --name bayyina -p 8000:8000 bayyina:ci
 
           echo "--- waiting for the service ---"
@@ -114,12 +126,18 @@ jobs:
           for _ in $(seq 1 45); do
             if curl -fsS http://127.0.0.1:8000/healthz >/dev/null 2>&1; then up=yes; break; fi
             if [ -z "$(docker ps -q --filter name=bayyina)" ]; then
-              echo "the container exited before it served anything"
+              echo "the container exited before it served anything. Its output:"
+              docker logs bayyina 2>&1 | tail -60
+              docker inspect -f 'exit={{.State.ExitCode}} oom={{.State.OOMKilled}}' bayyina
               exit 1
             fi
             sleep 1
           done
-          if [ -z "$up" ]; then echo "the service never became reachable"; exit 1; fi
+          if [ -z "$up" ]; then
+            echo "the service never became reachable. Its output:"
+            docker logs bayyina 2>&1 | tail -60
+            exit 1
+          fi
 
           echo "--- /healthz ---"
           curl -fsS http://127.0.0.1:8000/healthz -o health.json
@@ -150,7 +168,6 @@ jobs:
 
           echo "all container checks passed"
           docker rm -f bayyina
-          trap - EXIT
 
       - name: A tampered corpus must fail the image build
         run: |

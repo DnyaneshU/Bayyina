@@ -39,7 +39,6 @@ FROM python:3.11-slim AS runtime
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
-    BAYYINA_ENV=production \
     RULES_DIR=/app/rules \
     DATA_DIR=/app/data \
     FRONTEND_DIST=/app/static

@@ -656,3 +656,33 @@ parsing, so the digest is computed over identical text either way. That was
 checked rather than hoped, and a test now asserts it for every rule in the
 corpus. A property this load-bearing should not rest on a library behaviour
 nobody wrote down.
+
+### D-057 · The first container run crash-looped, and the guardrail was right
+**2026-09-09** — The `image` CI job failed at its smoke test: the container
+exited before serving anything, with no visible output.
+
+The cause was `BAYYINA_ENV=production` baked into the image. Production requires
+an https `BAYYINA_BASE_URL` (D-045), the image cannot know the hostname, so
+`Settings` raised at import and uvicorn exited instantly. **The guardrail did
+exactly what it was built to do.** The image was wrong.
+
+Two things made it hard to see, and both are fixed.
+
+**A comment described the opposite of the code.** An earlier edit to remove the
+line applied its explanatory comment — "BAYYINA_ENV is deliberately NOT set
+here" — and silently failed to remove the assignment sitting four lines below it,
+because the replacement was made without asserting that it matched. The file then
+read as correct to anyone reviewing it, including the author.
+
+**The diagnostics were collapsed.** `docker logs` ran inside a `::group::`, which
+GitHub renders folded, so the traceback was present and invisible. Diagnostics
+now print unfolded, and a separate step runs the image in the foreground before
+the smoke test so a boot failure prints its own traceback.
+
+`tests/test_deployment_config.py` now asserts what only fails at deploy time: the
+image sets no environment name and no base URL, its path variables name real
+`Settings` fields, the corpus is verified during the build, the container does
+not run as root, uvicorn trusts the proxy headers, the build context excludes
+secrets and data, and neither platform config uses a sleeping free tier.
+
+Proven: restoring the offending line turns the test red.

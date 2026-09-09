@@ -1060,22 +1060,49 @@ D-013 and is gated on the glossary, not on code.
 
 ## T1.9 — Deploy ⚠ THIS IS BOX N
 
-**Files:** `Dockerfile`, `.dockerignore`, `docs/CANVAS.md`
+**Files:** `Dockerfile`, `.dockerignore`, `.gitattributes`, `LICENSE`,
+`fly.toml`, `render.yaml`, `backend/src/bayyina/api/security.py`,
+`backend/tests/test_deployment_config.py`, `.github/workflows/ci.yml`
 
-- [ ] Write the Dockerfile — Python 3.11-slim, install the backend package, copy
-      `backend/rules/` and the built `frontend/dist/`, run uvicorn
-- [ ] **TLS.** Terminate at the platform edge (Railway/Render/Fly all do), never in
-      this process. Run uvicorn with `--proxy-headers --forwarded-allow-ips='*'`
-      so the app sees the original scheme instead of assuming http
-- [ ] **Set `BAYYINA_ENV=production` and an https `BAYYINA_BASE_URL`.** Settings
-      refuses to boot otherwise (D-045), so this is checked rather than remembered
-- [ ] Add HSTS and the standard security headers, and verify the certificate chain
-      from outside the platform dashboard
-- [ ] **Confirm HTTPS before Phase 3:** Twilio and ElevenLabs both require https
-      webhook endpoints, so this is a hard prerequisite, not a polish item
-- [ ] Deploy to a public host (Railway, Render or Fly.io free tier)
+### Engineering — done
+
+- [x] **Multi-stage Dockerfile** — Node builds the interface, Python runs it.
+      Non-root (uid 10001), no bytecode, unbuffered logs
+- [x] **Verify the corpus while building the image.** G7 as early as it can go:
+      an image carrying an unreviewed rule cannot exist. CI proves it by
+      tampering with a rule and asserting the build refuses
+- [x] **TLS at the edge, never in-process** — uvicorn runs with
+      `--proxy-headers --forwarded-allow-ips '*'`
+- [x] **Security headers** — strict CSP with no `unsafe-inline`, verified against
+      the built page; `X-Frame-Options: DENY`; HSTS **only over TLS** (D-055)
+- [x] **Normalise line endings** — `.gitattributes`, 29 files converted. CRLF
+      breaks every `run:` block on a Linux runner (D-056)
+- [x] **Add a LICENCE** — a public repo without one is all-rights-reserved, and
+      it records what the licence does not cover: the DLD dataset and the
+      legislation quoted in each rule
+- [x] **Fix the first container run** — the image baked in
+      `BAYYINA_ENV=production` with no base URL, so it crash-looped. The
+      guardrail was right; the image was wrong (D-057)
+- [x] **Test what only fails at deploy time** — image environment, non-root,
+      build-time corpus verification, proxy headers, build context, and both
+      platform configs
+- [x] **CI builds the image and smoke-tests the container**, with diagnostics
+      printed unfolded so a boot failure is readable
+- [x] **Run, confirm pass** — 252 backend, 50 frontend
+
+### Operator — yours, in order
+
+- [x] Initialise the repository and push it
+- [ ] Confirm CI is green, including the `image` job
+- [ ] Create the host account and run `fly launch --no-deploy`
+- [ ] **`fly secrets set BAYYINA_BASE_URL=https://<app>.fly.dev` — before the
+      first deploy.** The app refuses to boot in production without it
+- [ ] `fly deploy`
 - [ ] **Verify `/healthz` reports `corpus_signed: true` in production**
-- [ ] Record the live URL in `docs/CANVAS.md` box N
+- [ ] Run the tamper demo against the deployed URL once, so Box N is a claim you
+      have watched work
+- [ ] Check the certificate chain from outside the platform dashboard
+- [ ] Record the live URL in `docs/CANVAS.md` boxes N and Q
 
 **DoD:** A public URL returns a correct verdict. **Box N is no longer blocked and
 Stage 1 cannot score zero on it.** This is the single most important gate in the

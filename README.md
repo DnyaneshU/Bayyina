@@ -23,7 +23,7 @@ and sends a complete evidence pack to their phone **before the call ends**.
 🚧 **Phase 0 complete. Phase 1 (walking skeleton) in progress — T1.1–T1.8 done.**
 
 The engine is real and reachable: two signed rules, a deterministic evaluator, a
-hash-chained audit log, and a live `POST /evaluate` · `GET /healthz`, under 234
+hash-chained audit log, and a live `POST /evaluate` · `GET /healthz`, under 252
 backend and 50 frontend tests, with a working web checker the whole product
 serves from a single process. A verdict takes ~3 ms against a 150 ms budget, and
 the public routes are rate limited. Next is deployment (T1.9). This README is expanded
