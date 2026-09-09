@@ -1,0 +1,40 @@
+MIT License
+
+Copyright (c) 2026 Dnyanesh Ujalambkar
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---
+
+NOTES ON WHAT THIS LICENCE DOES AND DOES NOT COVER
+
+Market data. Bayyina derives comparable figures from `dld_rent_contracts-open`,
+registered tenancy contracts published as open data by Dubai Land Department.
+That dataset is not redistributed in this repository and is not covered by this
+licence; it remains subject to the publisher's own terms.
+
+Legal texts. The `verbatim` field of each rule file in `backend/rules/` quotes
+Dubai legislation in unofficial English translation. Every rule records that fact
+in its `review_notes` and ships with `approval.status: provisional`. The
+encodings are ours; the underlying law is not, and nothing here is an official
+statement of it.
+
+Not legal advice. This software produces information from published rules. It is
+not legal advice, not an official determination, and Bayyina is not a government
+entity and does not act for any authority.

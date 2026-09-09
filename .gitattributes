@@ -1,0 +1,40 @@
+# Line endings are normalised to LF in the repository.
+#
+# This is not housekeeping. The project is developed on Windows and deployed to
+# Linux, and a CRLF file breaks two things badly:
+#
+#   * every `run:` block in a GitHub Actions workflow — bash reads the trailing
+#     \r as part of the command and fails with an error that names a token
+#     nobody wrote
+#   * shell scripts and entrypoints inside the container, the same way
+#
+# Rule files are covered too. Their signatures happen to survive a line-ending
+# change, because PyYAML normalises line breaks when it parses — but that is a
+# property we should not have to rely on, and there is a test asserting it.
+
+* text=auto eol=lf
+
+# Explicit for the files where it matters most.
+*.yml    text eol=lf
+*.yaml   text eol=lf
+*.toml   text eol=lf
+*.py     text eol=lf
+*.sh     text eol=lf
+*.md     text eol=lf
+*.json   text eol=lf
+*.ts     text eol=lf
+*.tsx    text eol=lf
+*.css    text eol=lf
+*.html   text eol=lf
+*.svg    text eol=lf
+Dockerfile text eol=lf
+.dockerignore text eol=lf
+.gitignore text eol=lf
+
+# Never touched.
+*.png    binary
+*.jpg    binary
+*.ico    binary
+*.parquet binary
+*.duckdb binary
+*.pdf    binary

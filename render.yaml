@@ -1,0 +1,47 @@
+# Render deployment — the alternative to fly.toml. Use one or the other.
+#
+# Render is the easier of the two to set up: connect the repository in the
+# dashboard and it reads this file. There is one thing to understand before
+# choosing it.
+#
+# ⚠ THE FREE TIER SLEEPS. After fifteen minutes without traffic the service
+#   spins down, and the next visitor waits roughly fifty seconds for a cold
+#   start. For a link submitted in Box Q and clicked by a judge, that is a poor
+#   first impression of a product whose entire claim is that it answers quickly.
+#   `plan: starter` below keeps it awake and sits inside the $20/month budget.
+#
+# ⚠ THE AUDIT LOG IS EPHEMERAL without a disk, and a disk requires a paid plan.
+#   For the Stage 1 demo that is acceptable and stated rather than glossed: G9
+#   guarantees every evaluation is recorded and the chain is verifiable, not that
+#   a demo host retains it. Add the `disk:` block below for a pilot, and check
+#   that uid 10001 can write to the mount before trusting it.
+
+services:
+  - type: web
+    name: bayyina
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+
+    # `starter`, not `free`: see the notes above. Change to `free` only for a
+    # throwaway test, never for the link that goes into the submission.
+    plan: starter
+    region: frankfurt
+
+    healthCheckPath: /healthz
+
+    envVars:
+      - key: BAYYINA_ENV
+        value: production
+      # Set in the dashboard once the hostname exists. Settings refuses to boot
+      # in production unless this is https (D-045), so a missing or wrong value
+      # fails loudly instead of putting http links into an SMS to a resident.
+      - key: BAYYINA_BASE_URL
+        sync: false
+
+    # For a pilot, uncomment — and set DATA_DIR=/data to match:
+    #
+    # disk:
+    #   name: bayyina-data
+    #   mountPath: /data
+    #   sizeGB: 1

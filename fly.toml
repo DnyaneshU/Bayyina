@@ -1,0 +1,93 @@
+# Fly.io deployment — the recommended host for this project.
+#
+# Two reasons it is recommended over the alternatives, both about the judge who
+# clicks the Box Q link:
+#
+#   1. The machine can be kept warm. A free tier that sleeps after fifteen
+#      minutes gives a first visitor a blank page for the better part of a
+#      minute, and that visitor may be scoring the submission.
+#   2. A volume can be attached when the audit log needs to outlive a redeploy.
+#      See "Persistence" at the bottom — deliberately not enabled for the demo.
+#
+#     fly launch --no-deploy      # once, to claim the app name
+#     fly secrets set BAYYINA_BASE_URL=https://<your-app>.fly.dev
+#     fly deploy
+
+app = "bayyina"
+
+# Closest Fly region to the UAE. Change if your callers or judges are elsewhere;
+# this is a one-line change and a redeploy.
+primary_region = "bom"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  BAYYINA_ENV = "production"
+  # BAYYINA_BASE_URL is NOT set here. It belongs in `fly secrets` alongside the
+  # real hostname, and Settings refuses to boot in production unless it is https
+  # (D-045) — so a missing value fails loudly rather than shipping http links in
+  # an SMS to a resident.
+  # Left at the image default (/app/data), which the container's own user owns.
+  # See "Persistence" at the bottom of this file.
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+
+  # Kept warm deliberately. See the note at the top of this file: a cold start in
+  # front of a first-time visitor is a cost we are choosing not to pay.
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 40
+    hard_limit = 80
+
+# The health check is the corpus check. A machine whose rules did not verify
+# must never receive traffic — that is guardrail G7 at the load balancer.
+[[http_service.checks]]
+  grace_period = "10s"
+  interval = "30s"
+  method = "GET"
+  path = "/healthz"
+  timeout = "5s"
+
+[[vm]]
+  # 512 MB is comfortable: the corpus is two files and the rules engine is pure
+  # functions. Revisit at T2.1, when DuckDB and a 9.8M-row snapshot arrive.
+  memory = "512mb"
+  cpu_kind = "shared"
+  cpus = 1
+
+
+# ---------------------------------------------------------------------------
+# Persistence — read before a pilot
+# ---------------------------------------------------------------------------
+#
+# The audit log currently lives on the machine's ephemeral filesystem, so **it
+# is discarded on every redeploy**. For the Stage 1 demo that is acceptable and
+# is stated rather than glossed: the guarantee G9 makes is that every evaluation
+# is recorded and the chain is verifiable, not that a demo host retains it.
+#
+# For a pilot, mount a volume:
+#
+#     fly volumes create bayyina_data --size 1 --region bom
+#
+# and add:
+#
+#     [env]
+#       DATA_DIR = "/data"
+#
+#     [[mounts]]
+#       source = "bayyina_data"
+#       destination = "/data"
+#
+# ⚠ One thing to check when you do. The container runs as uid 10001 and a fresh
+#   volume is owned by root, so the first write may fail with a permission error.
+#   Confirm with `fly ssh console` and `ls -ld /data` before trusting it. This is
+#   left undone rather than guessed at, because it cannot be verified without
+#   deploying — and a persistence mechanism that silently fails is worse than an
+#   ephemeral one that is documented.

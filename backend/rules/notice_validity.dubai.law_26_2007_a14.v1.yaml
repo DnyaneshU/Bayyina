@@ -1,0 +1,50 @@
+id: notice_validity.dubai.law_26_2007_a14
+version: 1
+jurisdiction: AE-DU
+effective_from: 2008-12-01
+effective_to: null
+source:
+  document_id: dubai_law_26_2007_as_amended_by_law_33_2008
+  title: Law No. (26) of 2007 Regulating the Relationship between Landlords and Tenants
+    in the Emirate of Dubai, as amended by Law No. (33) of 2008
+  clause: Article 14
+  url: https://dubailand.gov.ae/
+  verbatim: |
+    Where either party to a Lease Contract wishes to amend any of its terms in
+    accordance with Article (13) of this Law, that party must notify the other
+    party of the same at least ninety (90) days prior to the date on which the
+    Lease Contract expires, unless the parties agree otherwise.
+logic: notice_period
+inputs:
+  contract_expiry:
+    type: date
+    required: true
+    derived: false
+  notice_served:
+    type: date
+    required: true
+    derived: false
+notice:
+  required_days: 90
+review_notes:
+- DEFAULT, NOT A FLOOR. The ninety days apply "unless the parties agree otherwise".
+  Bayyina cannot read the tenancy contract, so every answer from this rule assumes
+  no contrary agreement, and the evidence pack states that assumption beside the result.
+- SCOPE. Article 14 governs notice of an amendment to lease terms under Article 13,
+  which is what a rent increase is. A notice to vacate is governed by Article 25 and
+  carries a different period; it is out of scope for v1 and the agent must not answer
+  it from this rule.
+- COUNTING. Days are counted as calendar days between the date notice was served and
+  the contract expiry date, with no adjustment for public holidays or weekends. A
+  reviewer must confirm that the law is counted this way.
+- EFFECTIVE DATE. Law No. (33) of 2008 amended Law No. (26) of 2007. The date recorded
+  here must be confirmed against the Official Gazette before this rule is certified.
+- TRANSLATION. The verbatim text recorded here is an unofficial English translation.
+  It must be checked against the Arabic original before this rule is certified.
+- PROVENANCE. The URL is the publisher's site rather than a permanent link to the
+  gazetted text. Record the permanent link before certification.
+approval:
+  status: provisional
+  approved_by: Bayyina team
+  approved_at: '2026-09-09T08:00:30.001359+00:00'
+  signature: sha256:4959418b04ce7fcd72a0e8d25f3d07db55c25f53054081f1c2b1847f820a1bee

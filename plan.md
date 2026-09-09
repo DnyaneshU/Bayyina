@@ -1060,48 +1060,22 @@ D-013 and is gated on the glossary, not on code.
 
 ## T1.9 — Deploy ⚠ THIS IS BOX N
 
-**Files:** `Dockerfile`, `.dockerignore`, `.gitattributes`, `fly.toml`,
-`render.yaml`, `backend/src/bayyina/api/security.py`, `.github/workflows/ci.yml`
+**Files:** `Dockerfile`, `.dockerignore`, `docs/CANVAS.md`
 
-### Engineering — done
-
-- [x] **Write the Dockerfile** — multi-stage: Node builds the interface, Python
-      runs it. Non-root (uid 10001), no bytecode written, logs unbuffered
-- [x] **Verify the corpus at image build time.** G7 as early as it can go: an
-      image carrying an unsigned or tampered rule fails to build. CI proves it by
-      tampering with a rule and asserting the build refuses
-- [x] **TLS at the edge, never in-process** — uvicorn runs with
-      `--proxy-headers --forwarded-allow-ips '*'`, so the real scheme and client
-      address survive the proxy hop
-- [x] **Security headers** — a strict CSP with no `unsafe-inline`, verified
-      against the built page rather than assumed; `X-Frame-Options: DENY`;
-      HSTS **only over TLS**, because sending it on a local dev server pins
-      localhost to https in the developer's browser (D-055)
-- [x] **Normalise line endings** — `.gitattributes`, and 29 files converted.
-      CRLF breaks every `run:` block on a Linux runner (D-056)
-- [x] **Assert the rule digest survives a line-ending change** — otherwise a
-      Windows-to-Linux checkout would break every signature at once
-- [x] **Fix `audit_writable`** — it checked that the directory existed, which is
-      not the same as being able to write to it
-- [x] **CI builds the image and smoke-tests the container** — `/healthz` reports
-      two signed rules, `/` serves the interface, `/evaluate` returns the verified
-      demo verdict, and the process is not root
-- [x] **Platform configs** — `fly.toml` (recommended, kept warm) and
-      `render.yaml`, both with the cold-start and persistence trade-offs stated
-- [x] **Run, confirm pass** — 242 backend, 50 frontend
-
-### Operator — yours, in order
-
-- [ ] Initialise the repository and push it (**nothing has been committed yet**)
-- [ ] Confirm CI is green, including the new `image` job
-- [ ] Create the host account and run `fly launch --no-deploy`
-- [ ] `fly secrets set BAYYINA_BASE_URL=https://<app>.fly.dev`
-- [ ] `fly deploy`
+- [ ] Write the Dockerfile — Python 3.11-slim, install the backend package, copy
+      `backend/rules/` and the built `frontend/dist/`, run uvicorn
+- [ ] **TLS.** Terminate at the platform edge (Railway/Render/Fly all do), never in
+      this process. Run uvicorn with `--proxy-headers --forwarded-allow-ips='*'`
+      so the app sees the original scheme instead of assuming http
+- [ ] **Set `BAYYINA_ENV=production` and an https `BAYYINA_BASE_URL`.** Settings
+      refuses to boot otherwise (D-045), so this is checked rather than remembered
+- [ ] Add HSTS and the standard security headers, and verify the certificate chain
+      from outside the platform dashboard
+- [ ] **Confirm HTTPS before Phase 3:** Twilio and ElevenLabs both require https
+      webhook endpoints, so this is a hard prerequisite, not a polish item
+- [ ] Deploy to a public host (Railway, Render or Fly.io free tier)
 - [ ] **Verify `/healthz` reports `corpus_signed: true` in production**
-- [ ] Run the tamper demo against the deployed URL once, so Box N is a claim you
-      have watched work
-- [ ] Check the certificate chain from outside the platform dashboard
-- [ ] Record the live URL in `docs/CANVAS.md` box N and box Q
+- [ ] Record the live URL in `docs/CANVAS.md` box N
 
 **DoD:** A public URL returns a correct verdict. **Box N is no longer blocked and
 Stage 1 cannot score zero on it.** This is the single most important gate in the

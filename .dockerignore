@@ -1,0 +1,46 @@
+# Keep the build context small and keep secrets and local state out of the image.
+
+# --- Secrets: never, under any circumstances --------------------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# --- Local state and caches -------------------------------------------------
+**/__pycache__/
+**/*.py[cod]
+**/.venv/
+**/venv/
+**/.pytest_cache/
+**/.ruff_cache/
+**/.hypothesis/
+**/*.egg-info/
+.coverage
+htmlcov/
+
+# --- Node: reinstalled inside the build stage from the lockfile -------------
+**/node_modules/
+frontend/dist/
+backend/static/
+
+# --- Data: large and regenerable. The parquet alone is 200 MB ---------------
+backend/data/
+
+# --- Not needed at runtime --------------------------------------------------
+backend/tests/
+.github/
+docs/
+agent/
+plan.md
+README.md
+*.md
+!backend/rules/*.md
+
+# --- Version control and editors --------------------------------------------
+.git/
+.gitignore
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

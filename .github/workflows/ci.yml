@@ -1,0 +1,133 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install
+        run: python -m pip install -e ".[dev]"
+
+      - name: Lint
+        run: ruff check .
+
+      - name: Format check
+        run: ruff format --check .
+
+      # Guardrail G7 in CI: a rule edited without re-signing fails the build.
+      # This catches an honest mistake, not only an attack; the same check runs
+      # again at service boot.
+      #
+      # No --allow-empty. The corpus exists now, so an empty rules/ means a
+      # deleted file, a bad checkout, or a container build that did not copy it.
+      # Each of those must turn CI red rather than pass quietly.
+      - name: Verify rule corpus signatures
+        run: python scripts/verify_corpus.py rules/
+
+      - name: Test
+        run: pytest -v
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+  # The image is the deliverable at T1.9, so a Dockerfile that does not build is
+  # a broken deploy discovered at the worst moment. This also runs the corpus
+  # verification a third time, inside the image, where a missing rules/ COPY
+  # would otherwise go unnoticed until boot.
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build the image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: bayyina:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: The container serves a correct verdict
+        run: |
+          docker run -d --name bayyina -p 8000:8000 bayyina:ci
+          for _ in $(seq 1 30); do
+            curl -fs http://127.0.0.1:8000/healthz >/dev/null && break
+            sleep 1
+          done
+
+          echo "--- /healthz ---"
+          curl -fs http://127.0.0.1:8000/healthz | tee /tmp/health.json
+          grep -q '"corpus_signed":true' /tmp/health.json
+          grep -q '"rule_count":2' /tmp/health.json
+
+          echo "--- the interface is served from the same origin ---"
+          curl -fs http://127.0.0.1:8000/ | grep -q "Bayyina"
+
+          echo "--- /evaluate returns the verified demo verdict ---"
+          BODY='{"rule_id":"rent_increase.dubai.decree_43_2013",'
+          BODY=$BODY'"inputs":{"current_annual_rent":"80000","proposed_annual_rent":"96000","market_average_rent":"87000"},'
+          BODY=$BODY'"input_sources":{"current_annual_rent":"caller_stated","proposed_annual_rent":"caller_stated","market_average_rent":"user_supplied"},'
+          BODY=$BODY'"market":{"snapshot_id":"user_supplied"}}'
+
+          curl -fs -X POST http://127.0.0.1:8000/evaluate -H 'Content-Type: application/json' -d "$BODY" | tee /tmp/verdict.json
+          grep -q '"verdict":"not_permitted"' /tmp/verdict.json
+          grep -q '"clause":"Article 1"' /tmp/verdict.json
+
+          echo "--- the container does not run as root ---"
+          test "$(docker exec bayyina id -u)" = "10001"
+
+          docker rm -f bayyina
+
+      - name: A tampered corpus must fail the image build
+        run: |
+          RULE=backend/rules/rent_increase.dubai.decree_43_2013.v1.yaml
+          sed -i 's/max_increase: 0.05/max_increase: 0.99/' "$RULE"
+
+          if docker build -q -t bayyina:tampered . ; then
+            echo "FAIL: the image built with a tampered rule"
+            exit 1
+          fi
+          echo "OK: the build refused a tampered corpus"

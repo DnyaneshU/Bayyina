@@ -1,0 +1,72 @@
+@import "tailwindcss";
+
+/* ---------------------------------------------------------------------------
+   Design tokens.
+
+   This product asks people to trust a legal determination, so the interface has
+   to look considered rather than templated. One palette, reused by the checker,
+   the provenance pages, the officer dashboard and the PDF templates.
+
+   Outcome colours are deliberate: HUMAN_REVIEW_REQUIRED is a legitimate result,
+   not an error, so it reads as *considered* (slate/amber) and never as failure
+   (red). Rendering honesty as a malfunction teaches users to distrust it.
+--------------------------------------------------------------------------- */
+@theme {
+  --color-ink-900: #10231c;
+  --color-ink-700: #1f3d33;
+  --color-ink-500: #4a6b60;
+  --color-ink-300: #8fa79e;
+
+  --color-paper: #fbfaf7;
+  --color-paper-raised: #ffffff;
+  --color-rule: #e3e0d8;
+
+  /* Outcome states */
+  --color-clear: #14624a; /* determinate answer */
+  --color-conditional: #8a6a1f; /* answer with a named condition */
+  --color-review: #3d5a80; /* needs a person — considered, not failed */
+  --color-danger: #8c2f22; /* reserved for genuine errors only */
+
+  --font-sans:
+    "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-arabic: "Noto Sans Arabic", var(--font-sans);
+  --font-malayalam: "Noto Sans Malayalam", var(--font-sans);
+}
+
+:root {
+  color-scheme: light;
+}
+
+html {
+  background: var(--color-paper);
+  color: var(--color-ink-900);
+}
+
+/* Per-language typography. Set on <html lang> by the i18n layer. */
+html[lang="ar"] {
+  font-family: var(--font-arabic);
+}
+html[lang="ml"] {
+  font-family: var(--font-malayalam);
+}
+
+/* RTL is a layout concern, not a font swap. Components use logical properties
+   (margin-inline-start, padding-inline, text-start) so that setting dir="rtl"
+   mirrors the whole layout rather than only the text direction. */
+html[dir="rtl"] {
+  direction: rtl;
+}
+
+/* Accessibility floor: 44px tap targets and visible focus. The audience
+   includes older and lower-literacy users on small phones. */
+button,
+a[role="button"],
+input,
+select {
+  min-block-size: 44px;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-review);
+  outline-offset: 2px;
+}

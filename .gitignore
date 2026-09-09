@@ -1,0 +1,48 @@
+# --- Python / backend -------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.hypothesis/
+.coverage
+htmlcov/
+
+# --- Node / frontend --------------------------------------------------------
+node_modules/
+frontend/dist/
+
+# The built frontend, copied here so one container serves both. Build output,
+# never source: the Dockerfile produces it from frontend/.
+backend/static/
+*.tsbuildinfo
+.vite/
+coverage/
+
+# --- Secrets - never commit -------------------------------------------------
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# --- Data: large, regenerable, not ours to redistribute ---------------------
+backend/data/raw/
+backend/data/*.duckdb
+backend/data/*.duckdb.wal
+
+# The audit log holds caller-stated facts - rents, dates, areas. It is real
+# operational data about real people and must never reach the repository.
+backend/data/*.jsonl
+backend/data/audit.jsonl
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+
+# --- Editor -----------------------------------------------------------------
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,88 @@
+id: rent_increase.dubai.decree_43_2013
+version: 1
+jurisdiction: AE-DU
+effective_from: 2013-12-09
+effective_to: null
+source:
+  document_id: dubai_decree_43_2013
+  title: Decree No. (43) of 2013 Determining Increases in Real Property Rent in the
+    Emirate of Dubai
+  clause: Article 1
+  url: https://dubailand.gov.ae/
+  verbatim: |
+    The maximum rent increase for real property units in the Emirate of Dubai
+    shall be determined as follows:
+
+    1. no rent increase, where the rent for the real property unit is up to 10%
+       less than the average rental value of similar units;
+
+    2. 5% of the rent value for the real property unit, where the rent is 11% to
+       20% less than the average rental value of similar units;
+
+    3. 10% of the rent value for the real property unit, where the rent is 21%
+       to 30% less than the average rental value of similar units;
+
+    4. 15% of the rent value for the real property unit, where the rent is 31%
+       to 40% less than the average rental value of similar units; and
+
+    5. 20% of the rent value for the real property unit, where the rent is more
+       than 40% less than the average rental value of similar units.
+logic: banded_percentage
+inputs:
+  current_annual_rent:
+    type: money
+    currency: AED
+    required: true
+    derived: false
+  market_average_rent:
+    type: money
+    currency: AED
+    required: true
+    derived: true
+  proposed_annual_rent:
+    type: money
+    currency: AED
+    required: true
+    derived: false
+bands:
+- gap_from: 0.0
+  gap_to: 0.1
+  max_increase: 0.0
+- gap_from: 0.1
+  gap_to: 0.2
+  max_increase: 0.05
+- gap_from: 0.2
+  gap_to: 0.3
+  max_increase: 0.1
+- gap_from: 0.3
+  gap_to: 0.4
+  max_increase: 0.15
+- gap_from: 0.4
+  gap_to: null
+  max_increase: 0.2
+review_notes:
+- INTERPRETATION. The decree states its bands in whole percentages ("up to 10%", then
+  "11% to 20%"), which leaves gaps between 10% and 11%, 20% and 21%, 30% and 31%,
+  and 40% and 41% undefined in the text. This encoding uses continuous bands with
+  boundaries at 0.10, 0.20, 0.30 and 0.40, so a gap of 10.5% falls in the 5% band
+  rather than the 0% band. A reviewer must confirm this reading before the rule is
+  certified.
+- 'BOUNDARY. Bands match on the first row whose upper bound covers the gap, so the
+  upper bound is inclusive: a gap of exactly 0.10 permits no increase.'
+- MARKET AVERAGE. "The average rental value of similar units" is determined by the
+  RERA rental index. Bayyina computes its own comparable from the Dubai Land Department
+  open contracts dataset and records the source on every evaluation. Our figure is
+  not the official RERA index figure and is never described as one.
+- SCOPE. Decree 43/2013 governs the permitted percentage. Whether an increase was
+  validly notified is a separate question governed by Law 26/2007 Article 14 and answered
+  by notice_validity.dubai.law_26_2007_a14.
+- TRANSLATION. The verbatim text recorded here is an unofficial English translation.
+  It must be checked against the Arabic original in the Official Gazette before this
+  rule is certified.
+- PROVENANCE. The URL is the publisher's site rather than a permanent link to the
+  gazetted text. Record the permanent link before certification.
+approval:
+  status: provisional
+  approved_by: Bayyina team
+  approved_at: '2026-09-09T08:00:29.719612+00:00'
+  signature: sha256:bc45809fffe25406e2d032825cc3f60cbee8c003ddb5acc91b57c2f92c6400ab

@@ -1,0 +1,81 @@
+{
+  "product": {
+    "name": "Bayyina",
+    "tagline": "Check a Dubai rent increase against the published rules."
+  },
+  "outcome": {
+    "clear": "Clear",
+    "clearWithConditions": "Clear, with one condition",
+    "humanReviewRequired": "Needs a person to look at this",
+    "clearHint": "The rule settles this on the figures you gave."
+  },
+  "disclosure": {
+    "notAdvice": "Information from Dubai's published rental rules, not legal advice.",
+    "provisional": "Our encoding of these rules is pending review by a qualified lawyer, so treat this as information to check, not a ruling.",
+    "notOfficial": "This is not an official determination. Bayyina is not a government entity and does not act for any authority.",
+    "callerStated": "As stated by you. Not independently verified.",
+    "dataSource": "Based on registered tenancy contracts published as open data by Dubai Land Department."
+  },
+  "field": {
+    "currentRent": "What you pay now, per year",
+    "proposedRent": "What they are asking for",
+    "area": "Area",
+    "propertyType": "Property type",
+    "bedrooms": "Bedrooms",
+    "contractExpiry": "When your contract ends",
+    "noticeServed": "When they told you",
+    "currentRentHelp": "The annual rent on your current contract.",
+    "proposedRentHelp": "The annual rent they are asking for.",
+    "marketAverage": "Market average for a similar property"
+  },
+  "result": {
+    "marketAverage": "Market average",
+    "gapBelowMarket": "How far below the average",
+    "permittedIncrease": "Permitted increase",
+    "maxLawfulRent": "The most they can charge",
+    "rule": "Rule applied",
+    "comparableContracts": "Comparable contracts",
+    "heading": "Result",
+    "permitted": "That increase is within the published limit.",
+    "notPermitted": "That increase is above the published limit.",
+    "proposedIncrease": "What they are asking for",
+    "ruleVersion": "Rule version",
+    "signature": "Signature",
+    "sourceText": "What the rule says",
+    "showSource": "Show the clause",
+    "hideSource": "Hide the clause",
+    "howWeGotThere": "How we got there"
+  },
+  "action": {
+    "check": "Check my increase",
+    "downloadPack": "Download my case report"
+  },
+  "status": {
+    "checking": "Checking…",
+    "serviceUnavailable": "The service is not reachable right now."
+  },
+  "checker": {
+    "heading": "Check a rent increase",
+    "intro": "Enter the three amounts. We apply Dubai's published rule and show you the clause it comes from.",
+    "marketAverageHelp": "The average annual rent for a similar property in your area. Enter it from the RERA rental index or your own research — automatic comparables arrive in a later release.",
+    "currency": "AED",
+    "submit": "Check this increase",
+    "submitting": "Checking…",
+    "startOver": "Check another increase"
+  },
+  "validation": {
+    "required": "Enter an amount.",
+    "notANumber": "Enter an amount in numbers, like 80000.",
+    "mustBePositive": "Enter an amount greater than zero."
+  },
+  "condition": {
+    "heading": "This answer rests on one thing we could not check",
+    "market_average_not_derived": "You gave us the market average. We applied the rule to that figure exactly, but we have not checked that it is the right average for your property.",
+    "thin_comparable_data": "We found only {{count}} registered contracts for a property like yours. That is enough to apply the rule, but thinner than we would like."
+  },
+  "review": {
+    "heading": "This needs a person to look at it",
+    "body": "We found {{count}} comparable registered contracts — too few to give you a market comparison we can stand behind, so we are not going to quote one.",
+    "stillTrue": "The rule and its source are below. They do not depend on the market comparison."
+  }
+}
