@@ -92,19 +92,45 @@ jobs:
 
       - name: The container serves a correct verdict
         run: |
+          set -u
+
+          # Whatever happens after this, show what the container said. A failing
+          # smoke test with no logs is a failure you cannot act on.
+          dump() {
+            echo "::group::container logs"
+            docker logs bayyina 2>&1 || echo "(no container)"
+            echo "::endgroup::"
+            echo "::group::container state"
+            docker ps -a --filter name=bayyina || true
+            docker inspect -f '{{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}}' bayyina || true
+            echo "::endgroup::"
+          }
+          trap dump EXIT
+
           docker run -d --name bayyina -p 8000:8000 bayyina:ci
-          for _ in $(seq 1 30); do
-            curl -fs http://127.0.0.1:8000/healthz >/dev/null && break
+
+          echo "--- waiting for the service ---"
+          up=""
+          for _ in $(seq 1 45); do
+            if curl -fsS http://127.0.0.1:8000/healthz >/dev/null 2>&1; then up=yes; break; fi
+            if [ -z "$(docker ps -q --filter name=bayyina)" ]; then
+              echo "the container exited before it served anything"
+              exit 1
+            fi
             sleep 1
           done
+          if [ -z "$up" ]; then echo "the service never became reachable"; exit 1; fi
 
           echo "--- /healthz ---"
-          curl -fs http://127.0.0.1:8000/healthz | tee /tmp/health.json
-          grep -q '"corpus_signed":true' /tmp/health.json
-          grep -q '"rule_count":2' /tmp/health.json
+          curl -fsS http://127.0.0.1:8000/healthz -o health.json
+          cat health.json; echo
+          grep -q '"corpus_signed":true' health.json || { echo "corpus is not signed"; exit 1; }
+          grep -q '"rule_count":2' health.json      || { echo "expected 2 rules"; exit 1; }
 
           echo "--- the interface is served from the same origin ---"
-          curl -fs http://127.0.0.1:8000/ | grep -q "Bayyina"
+          curl -fsS http://127.0.0.1:8000/ -o index.html
+          head -c 400 index.html; echo
+          grep -q "Bayyina" index.html || { echo "the built frontend is not being served"; exit 1; }
 
           echo "--- /evaluate returns the verified demo verdict ---"
           BODY='{"rule_id":"rent_increase.dubai.decree_43_2013",'
@@ -112,14 +138,19 @@ jobs:
           BODY=$BODY'"input_sources":{"current_annual_rent":"caller_stated","proposed_annual_rent":"caller_stated","market_average_rent":"user_supplied"},'
           BODY=$BODY'"market":{"snapshot_id":"user_supplied"}}'
 
-          curl -fs -X POST http://127.0.0.1:8000/evaluate -H 'Content-Type: application/json' -d "$BODY" | tee /tmp/verdict.json
-          grep -q '"verdict":"not_permitted"' /tmp/verdict.json
-          grep -q '"clause":"Article 1"' /tmp/verdict.json
+          curl -fsS -X POST http://127.0.0.1:8000/evaluate             -H 'Content-Type: application/json' -d "$BODY" -o verdict.json
+          cat verdict.json; echo
+          grep -q '"verdict":"not_permitted"' verdict.json || { echo "wrong verdict"; exit 1; }
+          grep -q '"clause":"Article 1"' verdict.json      || { echo "citation missing"; exit 1; }
 
           echo "--- the container does not run as root ---"
-          test "$(docker exec bayyina id -u)" = "10001"
+          uid=$(docker exec bayyina id -u)
+          echo "uid=$uid"
+          [ "$uid" = "10001" ] || { echo "expected uid 10001"; exit 1; }
 
+          echo "all container checks passed"
           docker rm -f bayyina
+          trap - EXIT
 
       - name: A tampered corpus must fail the image build
         run: |
