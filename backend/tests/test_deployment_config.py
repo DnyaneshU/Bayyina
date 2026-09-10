@@ -118,15 +118,57 @@ def test_both_platform_configs_health_check_the_corpus():
     assert render["services"][0]["healthCheckPath"] == "/healthz"
 
 
-def test_neither_platform_config_uses_a_sleeping_free_tier():
-    """A cold start in front of the judge opening the Box Q link is a cost we
-    decided not to pay. See the notes at the top of both files."""
+def test_a_sleeping_tier_is_only_used_with_its_mitigation_written_down():
+    """We are on Render's free tier, and it sleeps after fifteen minutes.
+
+    That was not the plan. Hugging Face gated Docker behind a paid plan and Fly
+    and Railway both want a card, so a free tier that sleeps is what running the
+    real container without one costs (D-101).
+
+    The test therefore changed from "never use a sleeping tier" to "if you do,
+    the mitigation is in the file". A cold start in front of the judge opening
+    the Box Q link is still a real cost; what makes it acceptable is a keep-alive
+    that somebody set up, and the only way that survives being forgotten is to
+    write it beside the setting that makes it necessary.
+    """
+    render_text = (ROOT / "render.yaml").read_text(encoding="utf-8")
+    render = yaml.safe_load(render_text)
+
+    if render["services"][0]["plan"] == "free":
+        assert "uptimerobot" in render_text.lower() or "cron-job" in render_text.lower(), (
+            "the free tier sleeps and no keep-alive is documented, so the first "
+            "visitor waits fifty seconds"
+        )
+        assert "/healthz" in render_text
+        assert "750" in render_text, (
+            "the free instance-hour ceiling is not recorded, and a keep-alive runs into it"
+        )
+
+
+def test_fly_would_be_kept_warm_if_we_used_it():
+    """`fly.toml` is the config we switch to the moment there is a card.
+
+    Kept correct rather than deleted: it is a one-line decision to move, and a
+    config that has silently rotted is not a decision anybody can take quickly.
+    """
     fly = (ROOT / "fly.toml").read_text(encoding="utf-8")
     assert "auto_stop_machines = false" in fly
     assert "min_machines_running = 1" in fly
 
+
+def test_the_host_we_use_still_runs_our_own_container():
+    """The line we did not cross.
+
+    A free Gradio Space was available and would have meant no Dockerfile: no
+    build-time corpus verification, no non-root container, and no tamper demo —
+    that demo exists only because there is an image build to refuse. Paying a
+    cold start is the cheaper of the two costs.
+    """
     render = yaml.safe_load((ROOT / "render.yaml").read_text(encoding="utf-8"))
-    assert render["services"][0]["plan"] != "free"
+    service = render["services"][0]
+
+    assert service["runtime"] == "docker"
+    assert service["dockerfilePath"] == "./Dockerfile"
 
 
 # --- The development proxy ---------------------------------------------------
@@ -374,17 +416,25 @@ def test_the_image_installs_the_same_set_the_tests_ran_against(dockerfile):
     )
 
 
-def test_no_operational_data_is_tracked_in_the_repository():
-    """`backend/data/` holds real people, not fixtures.
+#: Committed on purpose: 1,324 aggregate medians, no individual contract or
+#: party, and the deployed service needs it to answer at all (D-102).
+PUBLISHABLE = {".gitkeep", "comparables.duckdb"}
 
-    Consent records, case rows and the full body of every evidence pack live in
-    `cases.db`. The ignore rules covered `*.duckdb` and `*.jsonl` because those
-    were the formats at the time; SQLite arrived with the case store and was
-    committed before anyone noticed — 28 cases and 167 pack bodies, synthetic
+
+def test_no_operational_data_is_tracked_in_the_repository():
+    """`backend/data/` holds two very different kinds of thing.
+
+    One is a public aggregate derived from open data, committed deliberately so
+    a host that builds from git can serve real comparables.
+
+    The other is consent records, case rows and the full body of every evidence
+    pack. The ignore rules covered `*.duckdb` and `*.jsonl` because those were
+    the formats at the time; SQLite arrived with the case store and was
+    committed before anyone noticed - 28 cases and 167 pack bodies, synthetic
     that time.
 
-    The next time it would not be synthetic, so this asserts the rule rather
-    than trusting that whoever adds the next storage format remembers.
+    The distinction the test encodes is not file format. It is whether the
+    contents are about a person.
     """
     if not shutil.which("git") or not (ROOT / ".git").exists():
         pytest.skip("not a git checkout")
@@ -396,14 +446,39 @@ def test_no_operational_data_is_tracked_in_the_repository():
         text=True,
     ).stdout.split()
 
-    # The placeholder is the one thing that must be here: without it the
-    # directory does not exist in a checkout and the image build fails.
-    offenders = [path for path in tracked if not path.endswith(".gitkeep")]
+    offenders = [path for path in tracked if Path(path).name not in PUBLISHABLE]
     assert not offenders, (
-        "these hold operational data and must not be in the repository:\n  "
+        "these are about real people and must not be in the repository:\n  "
         + "\n  ".join(offenders)
         + "\n\nUntrack them with `git rm --cached <path>` and commit."
     )
+
+
+def test_the_committed_market_data_is_the_aggregate_and_not_the_release():
+    """360 MB of individual tenancy contracts must never be committed.
+
+    `comparables.duckdb` is the serving database: medians per cell, with no row
+    describing anybody. `market.duckdb` beside it holds 9.8M contracts with
+    parties and amounts, and it stays out of both the repository and the image.
+    """
+    if not shutil.which("git") or not (ROOT / ".git").exists():
+        pytest.skip("not a git checkout")
+
+    tracked = subprocess.run(
+        ["git", "ls-files", "backend/data/"], cwd=ROOT, capture_output=True, text=True
+    ).stdout.split()
+
+    assert not [p for p in tracked if "market.duckdb" in p], (
+        "the 360 MB build database is in the repository"
+    )
+
+    serving = ROOT / "backend" / "data" / "comparables.duckdb"
+    if serving.is_file():
+        size_mb = serving.stat().st_size / 1_048_576
+        assert size_mb < 25, (
+            f"comparables.duckdb is {size_mb:.0f} MB. The serving database is "
+            f"aggregates; at this size it is carrying contract rows"
+        )
 
 
 # --- The Hugging Face Space ---------------------------------------------------

@@ -1,20 +1,50 @@
-# Render deployment — the alternative to fly.toml. Use one or the other.
+# Render deployment — the host we actually use.
 #
-# Render is the easier of the two to set up: connect the repository in the
-# dashboard and it reads this file. There is one thing to understand before
-# choosing it.
+# Chosen because it is the only one that runs our Dockerfile without a credit
+# card. Hugging Face Spaces gated the Docker SDK behind a paid plan (checked
+# 2026-09-11); Fly and Railway both require a card even on their free
+# allowances. See D-101.
+#
+# Connect the repository in the dashboard and Render reads this file.
 #
 # ⚠ THE FREE TIER SLEEPS. After fifteen minutes without traffic the service
-#   spins down, and the next visitor waits roughly fifty seconds for a cold
-#   start. For a link submitted in Box Q and clicked by a judge, that is a poor
-#   first impression of a product whose entire claim is that it answers quickly.
-#   `plan: starter` below keeps it awake and sits inside the $20/month budget.
+#   spins down, and the next visitor waits roughly fifty seconds. For a link
+#   submitted in Box Q and clicked by a judge, that is a poor first impression
+#   of a product whose entire claim is that it answers quickly.
 #
-# ⚠ THE AUDIT LOG IS EPHEMERAL without a disk, and a disk requires a paid plan.
-#   For the Stage 1 demo that is acceptable and stated rather than glossed: G9
-#   guarantees every evaluation is recorded and the chain is verifiable, not that
-#   a demo host retains it. Add the `disk:` block below for a pilot, and check
-#   that uid 10001 can write to the mount before trusting it.
+#   We are paying that cost knowingly rather than compromising the product to
+#   fit a free SDK — a Gradio Space would mean no Dockerfile, no build-time
+#   corpus verification, no non-root container, and no tamper demo, because that
+#   demo only exists because there is an image build to refuse.
+#
+#   MITIGATION, and it is not optional before the submission: point a free
+#   uptime monitor at /healthz every five minutes.
+#
+#     https://uptimerobot.com  or  https://cron-job.org
+#     URL:      https://<service>.onrender.com/healthz
+#     Interval: 5 minutes
+#
+#   /healthz is the right target: it is exempt from the rate limiter, it returns
+#   in single-digit milliseconds, and its answer is the corpus signature state —
+#   so the thing keeping the service awake is also the thing that would tell us
+#   it had stopped being trustworthy.
+#
+#   Render's free allowance is 750 instance-hours a month against roughly 720
+#   hours in a month, so one continuously-awake service fits. One. Adding a
+#   second free service and pinging both exhausts it before month end.
+#
+# ⚠ THE AUDIT LOG IS EPHEMERAL. A disk requires a paid plan, so the log is
+#   discarded on every redeploy. Stated rather than glossed: G9 guarantees that
+#   every evaluation is recorded and the chain is verifiable, not that a demo
+#   host retains it. Add the `disk:` block below for a pilot, and check that uid
+#   10001 can write to the mount before trusting it.
+#
+# ⚠ NO MARKET DATA. Render builds from the git repository, where
+#   `comparables.duckdb` is gitignored. The service will boot and report
+#   `degraded`, and the checker will offer manual entry only — which is a
+#   supported, tested state (D-074), not a fault. To ship the market data,
+#   commit it for the deploy or use `deploy/huggingface/deploy.py`, which exists
+#   precisely because it pushes from this machine.
 
 services:
   - type: web
@@ -23,11 +53,14 @@ services:
     dockerfilePath: ./Dockerfile
     dockerContext: .
 
-    # `starter`, not `free`: see the notes above. Change to `free` only for a
-    # throwaway test, never for the link that goes into the submission.
-    plan: starter
+    # `free`, and the notes above say what that costs and how it is mitigated.
+    # Change to `starter` the moment there is a card: it removes the cold start
+    # and the instance-hour ceiling in one line.
+    plan: free
     region: frankfurt
 
+    # The health check is the corpus check. A service whose rules did not verify
+    # must never receive traffic — G7 at the load balancer.
     healthCheckPath: /healthz
 
     envVars:

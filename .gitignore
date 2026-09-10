@@ -33,6 +33,22 @@ backend/data/raw/
 backend/data/*.duckdb
 backend/data/*.duckdb.wal
 
+# ...except the serving database, which is committed deliberately.
+#
+# 1.3 MB holding 1,324 aggregate medians - one per (area, property kind,
+# bedrooms) cell - not the 9.8M individual contracts it was computed from. The
+# build database beside it stays out at 360 MB.
+#
+# A derived artifact in source control normally goes stale silently. This one
+# cannot: it carries its own `snapshot_id`, /healthz publishes the age of the
+# newest contract in it, and past MARKET_SNAPSHOT_MAX_AGE_DAYS the service
+# quotes nothing at all rather than quoting something old.
+#
+# It is committed because our host builds from the repository, and without it
+# the deployed service reports `degraded` and offers manual entry only - which
+# is a supported state, but not the thing the product is for (D-102).
+!backend/data/comparables.duckdb
+
 # The case store, and the two files SQLite keeps beside it. This holds consent
 # records, case rows and the full body of every evidence pack — operational data
 # about real people. The patterns above covered DuckDB and JSON Lines because

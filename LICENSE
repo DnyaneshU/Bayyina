@@ -26,8 +26,17 @@ NOTES ON WHAT THIS LICENCE DOES AND DOES NOT COVER
 
 Market data. Bayyina derives comparable figures from `dld_rent_contracts-open`,
 registered tenancy contracts published as open data by Dubai Land Department.
-That dataset is not redistributed in this repository and is not covered by this
-licence; it remains subject to the publisher's own terms.
+
+That dataset is **not** redistributed here. What this repository does contain is
+`backend/data/comparables.duckdb`: 1,324 aggregate medians, one per (area,
+property kind, bedrooms) cell, computed from the release and carrying the
+snapshot identifier they came from. No individual contract, party, address or
+amount is included, and the figures cannot be reversed into any.
+
+That aggregate is published so the deployed service can answer the question it
+exists to answer. It remains subject to Dubai Land Department's own terms, and it
+is not the official RERA rental index - a distinction every surface of this
+product is required to preserve.
 
 Legal texts. The `verbatim` field of each rule file in `backend/rules/` quotes
 Dubai legislation in unofficial English translation. Every rule records that fact

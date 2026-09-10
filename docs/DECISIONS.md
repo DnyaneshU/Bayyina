@@ -1571,3 +1571,73 @@ beside T3.6, where the voice side needs the same translations.
 What survives into Phase 3 unchanged is the reason the gate exists — that a
 correct answer nobody understands is a failed answer. That is worth running in
 English against two readers who are not us, and it costs an afternoon.
+
+### D-101 · Render's free tier, and the line we would not cross to avoid it
+**2026-09-11** — There is no credit card. That removes Fly and Railway, which
+want one even on their free allowances, and — checked today — Hugging Face, which
+has moved the Docker SDK behind a paid plan.
+
+Hugging Face still offers Gradio and Static free, and a Gradio Space was the
+obvious way to stay there. It would have cost the Dockerfile: Gradio Spaces
+install from `requirements.txt`, so there is no Node build stage, no build-time
+corpus verification, no non-root container, and **no tamper demo** — that demo
+exists only because there is an image build for a bad corpus to refuse. Trading
+the strongest thing we can show for a hosting slot is the wrong trade.
+
+So: Render free, which runs our Dockerfile unchanged.
+
+**It sleeps after fifteen minutes, and the next visitor waits about fifty
+seconds.** That is a real cost in front of a judge opening the Box Q link, and it
+is paid knowingly. The mitigation is a free uptime monitor on `/healthz` every
+five minutes — `/healthz` because it is exempt from the rate limiter, answers in
+single-digit milliseconds, and reports the corpus signature state, so the thing
+keeping the service awake is also the thing that would tell us it had stopped
+being trustworthy. Render's free allowance is 750 instance-hours against a ~720
+hour month, so exactly one continuously-awake service fits.
+
+The test that forbade a sleeping tier now allows one **only when the mitigation
+is written in the file beside the setting that makes it necessary**. A keep-alive
+that lives in somebody's memory is a keep-alive that stops.
+
+`fly.toml` is kept correct rather than deleted. Moving is a one-line decision the
+moment there is a card, and a config that has silently rotted is not a decision
+anyone can take quickly.
+
+**One thing this costs that Fly would not have.** Render builds from the git
+repository, and `comparables.duckdb` is gitignored — so the deployed service has
+no market data, reports `degraded`, and offers manual entry only. That is a
+supported, tested state (D-074), not a fault, but it is not the product's
+distinguishing claim either. `deploy/huggingface/deploy.py` exists because it
+pushes from this machine and carries the database across; it is kept for the day
+Docker is available again, and because the same approach works for any host that
+takes a git push.
+
+### D-102 · The serving aggregate is committed; the release is not
+**2026-09-11** — Render builds from the git repository, and `comparables.duckdb`
+was gitignored — so the deployed service would have reported `degraded` and
+offered manual entry only. That is a supported state (D-074) and it is not the
+product. Deriving the market figure from registered contracts is the thing
+Bayyina is for.
+
+So the serving database is committed: **1.3 MB, 1,324 aggregate medians**, one
+per (area, property kind, bedrooms) cell. No individual contract, party, address
+or amount, and the figures cannot be reversed into any. `market.duckdb` beside
+it — 9.8M contract rows at 360 MB — stays out of the repository and out of the
+image, and a test asserts both.
+
+**A derived artifact in source control normally goes stale silently.** This one
+cannot: it carries its own `snapshot_id`, `/healthz` publishes the age of the
+newest contract in it, and past `MARKET_SNAPSHOT_MAX_AGE_DAYS` the service quotes
+nothing rather than quoting something old. The staleness is disclosed by the
+product itself, which is why committing it is safe here and would not be for a
+file with no such property.
+
+The LICENCE note changed with it. It said the dataset "is not redistributed in
+this repository", which was true and stopped being true the moment this file was
+added. It now states precisely what is here and what is not — a claim we publish
+has to survive the thing it describes changing.
+
+The tracked-data test changed too, and the distinction it encodes is worth
+stating: **not file format, but whether the contents are about a person.**
+`comparables.duckdb` is permitted; `cases.db` and `audit.jsonl` are not, and the
+test names them that way.
