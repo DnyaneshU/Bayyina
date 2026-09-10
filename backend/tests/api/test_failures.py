@@ -306,3 +306,69 @@ def test_nothing_else_in_the_package_builds_an_http_client():
         "these bypass the tool timeout budget - use bayyina.outbound.client "
         "instead:\n  " + "\n  ".join(offenders)
     )
+
+
+# --- The taxonomy is the behaviour, not a document beside it ------------------
+
+
+def test_the_declared_status_is_the_status_the_api_returns(client: TestClient):
+    """The agent scripts promise these codes. The service must keep the promise.
+
+    A taxonomy that lives only in markdown drifts the first time someone changes
+    a status code, and the agent then treats a 503 it was told to expect as an
+    unhandled failure — mid-call.
+    """
+    # An untranslated language.
+    response = client.post("/evidence-pack", json={**BODY, "language": "ml"})
+    assert response.status_code == behaviour(Failure.UNSUPPORTED_LANGUAGE).status
+
+    # A derived figure with no comparables database behind it.
+    derived = {
+        "rule_id": BODY["rule_id"],
+        "inputs": {"current_annual_rent": "80000", "proposed_annual_rent": "96000"},
+        "input_sources": {
+            "current_annual_rent": "caller_stated",
+            "proposed_annual_rent": "caller_stated",
+        },
+        "dwelling": {"area": "Al Barsha First", "kind": "flat", "bedrooms": 2},
+    }
+    assert (
+        client.post("/evaluate", json=derived).status_code
+        == behaviour(Failure.MARKET_DATA_ABSENT).status
+    )
+
+
+def test_the_taxonomy_is_imported_by_the_code_that_answers(tmp_path):
+    """The guard on the guard.
+
+    Wiring can be undone by anyone hardcoding a number back in. This asserts the
+    routes actually read the taxonomy rather than happening to agree with it
+    today.
+    """
+    api = ROOT / "backend" / "src" / "bayyina" / "api"
+    wired = [
+        path.name
+        for path in api.glob("*.py")
+        if "behaviour(Failure." in path.read_text(encoding="utf-8")
+    ]
+    for required in ("routes_evaluate.py", "routes_pack.py", "rate_limit.py", "app.py"):
+        assert required in wired, (
+            f"{required} no longer reads the failure taxonomy, so its status codes "
+            f"and the agent scripts can disagree"
+        )
+
+
+def test_rate_limiting_answers_the_code_the_taxonomy_names(tmp_path):
+    """429 is in the agent scripts as 'back off and retry once'."""
+    throttled = TestClient(
+        create_app(
+            audit_path=tmp_path / "audit.jsonl",
+            market_db=tmp_path / "absent.duckdb",
+            case_db=tmp_path / "cases.db",
+            settings=Settings(public_rate_limit_per_minute=1),
+        )
+    )
+    throttled.post("/evidence-pack", json=BODY)
+    again = throttled.post("/evidence-pack", json=BODY)
+
+    assert again.status_code == behaviour(Failure.RATE_LIMITED).status

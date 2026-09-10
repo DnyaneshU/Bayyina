@@ -34,11 +34,14 @@ where = ["src"]
 # with "template not found". Declared explicitly rather than via
 # include-package-data, which depends on what the VCS happens to be tracking.
 [tool.setuptools.package-data]
-# The markers are declared too, so the templates tree stays self-describing
-# wherever it is installed. Kept as a strict sweep with no extension
-# exemptions: a heuristic that skips ".md" would eventually skip something
-# the package does need.
-"bayyina.evidence" = ["templates/**/*.j2", "templates/**/*.md"]
+"bayyina.evidence" = [
+    "templates/**/*.j2",
+    "templates/**/*.md",
+    # `_TRANSLATION_STATUS` has no extension, and it is the gate that keeps an
+    # unreviewed draft out of a caller's hands. An image shipped without it would
+    # treat every draft as approved and serve Arabic nobody has checked.
+    "templates/**/_TRANSLATION_STATUS",
+]
 # The schema is not Python either. Without this the container boots, serves
 # /healthz, and fails the first time anything opens a case.
 "bayyina.store" = ["migrations/*.sql"]

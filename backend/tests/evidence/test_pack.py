@@ -373,12 +373,19 @@ def test_the_document_fits_on_a_printed_page(rent_eval, notice_eval):
 def test_every_unsupported_language_leaves_instructions():
     """A gap nobody can find is a gap nobody closes.
 
-    Each language the product promises but cannot yet render carries a marker
-    saying what is needed and why it is blocked — the same shape as the locale
-    files' `_TRANSLATION_STATUS` (D-022). A directory with no template and no
-    note reads as an oversight rather than a decision.
+    A language the product promises but does not deliver is in one of two
+    states, and both must be legible from the directory alone:
+
+      * no template at all - nothing has been written yet; or
+      * a template plus `_TRANSLATION_STATUS` - a draft exists so the
+        comprehension gate can be run, and it is not deliverable until a native
+        speaker removes that file.
+
+    A directory with a template and no marker is the dangerous third state: a
+    machine draft quietly serving real callers. `supported_languages()` treats
+    the marker as the gate, so this asserts the marker is actually there.
     """
-    from bayyina.evidence.pack import PACK_TEMPLATE, TEMPLATE_ROOT
+    from bayyina.evidence.pack import PACK_TEMPLATE, TEMPLATE_ROOT, TRANSLATION_MARKER
 
     promised = {"en", "ar", "ml"}
     supported = set(supported_languages())
@@ -386,16 +393,170 @@ def test_every_unsupported_language_leaves_instructions():
     for language in sorted(promised - supported):
         directory = TEMPLATE_ROOT / language
         assert directory.is_dir(), f"{language} is promised but has no template directory"
-        assert not (directory / PACK_TEMPLATE).exists()
 
-        notes = list(directory.glob("_TRANSLATION_NEEDED*"))
-        assert notes, f"{language} has no template and no note saying what is needed"
+        marker = directory / TRANSLATION_MARKER
+        if (directory / PACK_TEMPLATE).exists():
+            assert marker.is_file(), (
+                f"{language} has a template and no {TRANSLATION_MARKER}, so an "
+                f"unreviewed draft would be delivered to real callers"
+            )
 
-        text = notes[0].read_text(encoding="utf-8")
+        assert marker.is_file(), f"{language} has no note saying what is needed"
+        text = marker.read_text(encoding="utf-8")
         assert "GLOSSARY" in text, f"{language}'s note does not point at the source of truth"
-        assert "D1" in text, f"{language}'s note does not mention the disclosures"
+        assert "disclosure" in text.lower(), f"{language}'s note does not mention the disclosures"
 
 
 def test_a_marker_file_does_not_make_a_language_supported():
     """Support is the template, not the intention to write one."""
     assert set(supported_languages()) == {"en"}
+
+
+# --- The translation gate -----------------------------------------------------
+#
+# There is no drafted language in the tree, and that is deliberate: **machine
+# translation is not acceptable** for a document that tells someone what their
+# landlord may lawfully charge. A plausible-sounding mistranslation is worse than
+# no document, because the reader has no way to tell.
+#
+# The gate is tested with a temporary language instead. It has to work before a
+# real translator arrives, not after — the failure it prevents is an unreviewed
+# template quietly becoming deliverable the moment someone drops a file in.
+
+
+@pytest.fixture
+def template_root(tmp_path, monkeypatch):
+    """A template tree we can put languages into, without touching the package."""
+    import bayyina.evidence.pack as pack_module
+    import bayyina.evidence.render as render_module
+
+    (tmp_path / "en").mkdir()
+    (tmp_path / "en" / "pack.txt.j2").write_text("english\n", encoding="utf-8")
+
+    monkeypatch.setattr(pack_module, "TEMPLATE_ROOT", tmp_path)
+    monkeypatch.setattr(render_module, "TEMPLATE_ROOT", tmp_path)
+    return tmp_path
+
+
+def _add_language(root, code, *, reviewed: bool) -> None:
+    directory = root / code
+    directory.mkdir(exist_ok=True)
+    (directory / "pack.txt.j2").write_text("translated\n", encoding="utf-8")
+    if not reviewed:
+        (directory / "_TRANSLATION_STATUS").write_text(
+            "NOT REVIEWED. Machine translation is not acceptable. See GLOSSARY.",
+            encoding="utf-8",
+        )
+
+
+def test_a_template_with_a_marker_is_not_deliverable(template_root, rent_eval):
+    """The failure this gate exists to stop.
+
+    A template appearing on disk must not make a language servable. Without the
+    marker check, dropping in an unreviewed file is all it takes for a caller to
+    receive a document in wording nobody has read.
+    """
+    from bayyina.evidence.pack import draft_languages, supported_languages
+
+    _add_language(template_root, "xx", reviewed=False)
+
+    assert "xx" in draft_languages()
+    assert "xx" not in supported_languages()
+
+    with pytest.raises(UnsupportedLanguageError, match="not reviewed"):
+        build_pack([rent_eval], "BYN-1", "xx")
+
+
+def test_removing_the_marker_is_the_act_of_approval(template_root):
+    """One file, one meaning. Approval is not a flag somewhere else."""
+    from bayyina.evidence.pack import draft_languages, supported_languages
+
+    _add_language(template_root, "xx", reviewed=False)
+    assert "xx" not in supported_languages()
+
+    (template_root / "xx" / "_TRANSLATION_STATUS").unlink()
+
+    assert "xx" in supported_languages()
+    assert "xx" not in draft_languages()
+
+
+def test_a_draft_renders_only_when_asked_explicitly(template_root, rent_eval):
+    """So the comprehension gate (T2.8) can be run on a draft before approval,
+    while nothing serving a caller can reach it by accident."""
+    _add_language(template_root, "xx", reviewed=False)
+
+    pack = build_pack([rent_eval], "BYN-1", "xx", allow_draft=True)
+    assert pack.language == "xx"
+
+
+def test_the_refusal_says_why_and_what_to_do(template_root, rent_eval):
+    """A refusal nobody can act on is a dead end."""
+    _add_language(template_root, "xx", reviewed=False)
+
+    with pytest.raises(UnsupportedLanguageError) as raised:
+        build_pack([rent_eval], "BYN-1", "xx")
+
+    message = str(raised.value)
+    assert "not reviewed" in message
+    assert "GLOSSARY" in message, "the refusal does not point at the source of truth"
+
+
+def test_the_gate_is_not_confused_by_a_marker_without_a_template(template_root):
+    """A marker alone means nothing has been written yet, not that a draft
+    exists."""
+    from bayyina.evidence.pack import draft_languages, supported_languages
+
+    (template_root / "yy").mkdir()
+    (template_root / "yy" / "_TRANSLATION_STATUS").write_text("nothing yet", encoding="utf-8")
+
+    assert "yy" not in supported_languages()
+    assert "yy" not in draft_languages()
+
+
+def test_a_missing_translation_raises_rather_than_falling_back_to_english():
+    """The mechanism a real translator depends on.
+
+    Their first missing label must fail loudly. Falling back to English would
+    produce a pack that is Arabic prose with English scattered through it -
+    which looks finished to whoever shipped it and does not to whoever reads it.
+    """
+    from bayyina.evidence.wording import MissingWordingError, label
+
+    assert label("current_annual_rent") == "What you pay now, per year"
+
+    with pytest.raises(MissingWordingError, match="half in one language"):
+        label("current_annual_rent", "ar")
+
+
+def test_a_date_in_an_unknown_language_raises_rather_than_printing_english():
+    """`strftime('%B')` would print "September" inside Arabic text.
+
+    A date is the field a reader checks first, and one in the wrong script says
+    immediately that the document was not written for them.
+    """
+    from datetime import date
+
+    assert written_date(date(2026, 11, 30)) == "30 November 2026"
+
+    with pytest.raises(UnsupportedLanguageError, match="month names"):
+        written_date(date(2026, 11, 30), "ar")
+
+
+def test_no_language_is_promised_that_cannot_be_written():
+    """The markers are the instructions a translator picks up.
+
+    A directory with neither a template nor a note reads as an oversight rather
+    than a decision, and nobody closes a gap they cannot find.
+    """
+    from bayyina.evidence.pack import TEMPLATE_ROOT, TRANSLATION_MARKER
+
+    for language in ("ar", "ml"):
+        marker = TEMPLATE_ROOT / language / TRANSLATION_MARKER
+        assert marker.is_file(), f"{language} has no note saying what is needed"
+
+        text = marker.read_text(encoding="utf-8")
+        assert "GLOSSARY" in text
+        assert "Machine translation is not acceptable" in text, (
+            f"{language}'s note does not forbid machine translation, which is the "
+            f"one instruction that matters for a document like this"
+        )

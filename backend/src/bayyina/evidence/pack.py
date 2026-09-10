@@ -47,23 +47,62 @@ class UnsupportedLanguageError(EvidenceError):
     """
 
 
-def supported_languages() -> tuple[str, ...]:
-    """Languages a pack can actually be produced in, derived from the templates.
+#: A language directory carrying this file has a template that **has not been
+#: reviewed by a native speaker**. Same mechanism as the interface locales
+#: (D-022): the marker is the single source of truth, and removing it is the act
+#: of approval. A draft that renders is not a translation that ships.
+TRANSLATION_MARKER = "_TRANSLATION_STATUS"
 
-    Derived, never listed. A language becomes supported by a translated template
-    file appearing on disk — the same shape as the interface's language switcher
+
+def _language_dirs() -> list[Path]:
+    if not TEMPLATE_ROOT.is_dir():
+        return []
+    return sorted(
+        directory
+        for directory in TEMPLATE_ROOT.iterdir()
+        if directory.is_dir() and (directory / PACK_TEMPLATE).is_file()
+    )
+
+
+def supported_languages() -> tuple[str, ...]:
+    """Languages a pack may actually be **delivered** in.
+
+    Derived, never listed. A language becomes supported by a reviewed template
+    appearing on disk — the same shape as the interface's language switcher
     (D-065), so there is no second place to remember and no way to advertise a
     language nothing can render.
+
+    A drafted-but-unreviewed template does not count. Rendering it would produce
+    a document about someone's tenancy in wording no native speaker has checked,
+    which is a worse failure than the English fallback we already refuse: this
+    one *looks* right to the reader.
     """
-    if not TEMPLATE_ROOT.is_dir():
-        return ()
     return tuple(
-        sorted(
-            directory.name
-            for directory in TEMPLATE_ROOT.iterdir()
-            if directory.is_dir() and (directory / PACK_TEMPLATE).is_file()
-        )
+        directory.name
+        for directory in _language_dirs()
+        if not (directory / TRANSLATION_MARKER).is_file()
     )
+
+
+def draft_languages() -> tuple[str, ...]:
+    """Languages with a template awaiting review.
+
+    These exist so the comprehension gate (T2.8) can be run at all: it needs a
+    document to put in front of a Malayalam reader, and there is no way to get
+    one without drafting it first. `build_pack(..., allow_draft=True)` renders
+    them; nothing serving a real caller passes that flag.
+    """
+    return tuple(
+        directory.name
+        for directory in _language_dirs()
+        if (directory / TRANSLATION_MARKER).is_file()
+    )
+
+
+def translation_status(language: str) -> str | None:
+    """Why a drafted language is not yet deliverable, in the words of the file."""
+    marker = TEMPLATE_ROOT / language / TRANSLATION_MARKER
+    return marker.read_text(encoding="utf-8").strip() if marker.is_file() else None
 
 
 class EvidencePack(BaseModel):
@@ -118,6 +157,8 @@ def build_pack(
     records: object,
     caller_ref: str,
     language: str,
+    *,
+    allow_draft: bool = False,
 ) -> EvidencePack:
     """Assemble an evidence pack, or refuse.
 
@@ -146,7 +187,17 @@ def build_pack(
         raise EvidenceError("an evidence pack with no findings is not a document")
 
     available = supported_languages()
+    drafts = draft_languages()
+    if allow_draft:
+        available = tuple(sorted({*available, *drafts}))
+
     if language not in available:
+        if language in drafts:
+            raise UnsupportedLanguageError(
+                f"the {language!r} template is drafted but not reviewed, so it is "
+                f"not delivered. {translation_status(language) or ''} "
+                f"Pass allow_draft=True only to run the comprehension gate."
+            )
         raise UnsupportedLanguageError(
             f"no evidence template for {language!r}. Available: "
             f"{', '.join(available) or 'none'}. A pack is not produced in a "
@@ -179,12 +230,51 @@ def money(amount: Decimal | int | float | str | None) -> str:
     return f"AED {whole:,}"
 
 
-def written_date(value: date | datetime | str | None) -> str:
-    """`30 November 2026`. Never numeric."""
+#: Gregorian month names per language. `strftime('%B')` gives whatever the
+#: process locale happens to be, which in a container is English — so an Arabic
+#: pack printed "10 September 2026" in the middle of Arabic text. A date is the
+#: field a reader checks first, and one in the wrong script is the fastest way
+#: to tell them this document was not really written for them.
+MONTHS: dict[str, tuple[str, ...]] = {
+    "en": (
+        "January",
+        "February",
+        "March",
+        "April",
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        "October",
+        "November",
+        "December",
+    ),
+    # Added with each language's template. `strftime('%B')` is not used: it
+    # gives whatever the process locale happens to be, which in a container is
+    # English - so an Arabic pack would print "10 September 2026" in the middle
+    # of Arabic text. A date is the field a reader checks first, and one in the
+    # wrong script says immediately that the document was not written for them.
+}
+
+
+def written_date(value: date | datetime | str | None, language: str = "en") -> str:
+    """`30 November 2026`. Never numeric, and never in the wrong language.
+
+    Numeric dates are banned outright: 03/04/2026 is two different days
+    depending on where the reader learned to read dates, and this document is
+    read by people from everywhere.
+    """
     if value is None:
         return "—"
     if isinstance(value, str):
         value = date.fromisoformat(value)
     if isinstance(value, datetime):
         value = value.date()
-    return f"{value.day} {value.strftime('%B')} {value.year}"
+    months = MONTHS.get(language)
+    if months is None:
+        raise UnsupportedLanguageError(
+            f"no month names for {language!r}. A date in the wrong script tells a "
+            f"reader the document was not written for them - add them to MONTHS."
+        )
+    return f"{value.day} {months[value.month - 1]} {value.year}"

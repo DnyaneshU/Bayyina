@@ -12,6 +12,7 @@ These are the checks that only fail at deploy time, which is the worst time.
 import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -331,4 +332,43 @@ def test_every_non_python_file_the_package_needs_is_declared_as_package_data():
     assert not undeclared, (
         "these files ship in the source tree but not in an installed package:\n  "
         + "\n  ".join(undeclared)
+    )
+
+
+# --- Reproducible installs ----------------------------------------------------
+
+
+def test_every_declared_dependency_is_pinned():
+    """A green build must stay green without anyone touching it.
+
+    The floors in `pyproject.toml` say what the code needs. Alone, they mean
+    every install resolves whatever was published that morning — and on
+    2026-09-10 that turned three passing suites into three red CI jobs with no
+    change to our source (D-087).
+    """
+    result = subprocess.run(
+        [sys.executable, "scripts/refresh_constraints.py", "--check"],
+        cwd=ROOT / "backend",
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_ci_installs_the_pinned_set():
+    """A constraints file nothing installs with is a file that documents a wish."""
+    workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    assert "-c constraints.txt" in workflow, (
+        "CI does not install with constraints, so it still resolves whatever was "
+        "released this morning"
+    )
+
+
+def test_the_image_installs_the_same_set_the_tests_ran_against(dockerfile):
+    """Otherwise the container ships dependencies nothing ran the suite against."""
+    assert "constraints.txt" in dockerfile, (
+        "the image installs unpinned, so it can differ from what CI tested"
+    )
+    assert re.search(r"COPY .*constraints\.txt", dockerfile), (
+        "constraints.txt is used but never copied into the build"
     )

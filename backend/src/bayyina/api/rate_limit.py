@@ -28,6 +28,8 @@ from collections.abc import Awaitable, Callable
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 
+from .errors import Failure, behaviour
+
 WINDOW_SECONDS = 60
 
 # Polled by the platform, so never limited. Anything added here must be cheap
@@ -95,7 +97,7 @@ def add_rate_limiting(app: FastAPI, per_minute: int) -> None:
         allowed, resets_in = limiter.check(_client_of(request))
         if not allowed:
             return JSONResponse(
-                status_code=429,
+                status_code=behaviour(Failure.RATE_LIMITED).status,
                 content={
                     "detail": (
                         f"Too many requests. The limit is {per_minute} per minute. "

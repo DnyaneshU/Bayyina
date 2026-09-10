@@ -24,9 +24,9 @@ EXPECTED_TABLES = (
 )
 
 
-def test_migrations_create_every_table_the_journey_needs(db):
+def test_migrations_create_every_table_the_journey_needs(store):
     for table in EXPECTED_TABLES:
-        assert table_exists(db, table), f"{table} is missing from the schema"
+        assert table_exists(store, table), f"{table} is missing from the schema"
 
 
 def test_migrations_are_idempotent(tmp_path):
@@ -62,12 +62,12 @@ def test_a_busy_writer_waits_rather_than_raising(tmp_path):
     assert connection.execute("pragma busy_timeout").fetchone()[0] >= 1000
 
 
-def test_foreign_keys_are_enforced(db):
+def test_foreign_keys_are_enforced(store):
     """Off by default in SQLite, which surprises everyone exactly once."""
-    assert db.execute("pragma foreign_keys").fetchone()[0] == 1
+    assert store.execute("pragma foreign_keys").fetchone()[0] == 1
 
     with pytest.raises(sqlite3.IntegrityError):
-        db.execute(
+        store.execute(
             """
             insert into deadlines (deadline_id, call_id, case_id, rule_id, due_on)
             values ('dl_1', 'call-1', 'case-that-does-not-exist', 'r', '2026-12-01')
@@ -75,14 +75,14 @@ def test_foreign_keys_are_enforced(db):
         )
 
 
-def test_every_table_carries_the_call_id(db):
+def test_every_table_carries_the_call_id(store):
     """One identifier threads the whole journey.
 
     Without it, answering "what happened to this person?" means joining on
     timestamps and hoping.
     """
     for table in EXPECTED_TABLES:
-        columns = {row["name"] for row in db.execute(f"pragma table_info({table})")}
+        columns = {row["name"] for row in store.execute(f"pragma table_info({table})")}
         assert "call_id" in columns, f"{table} cannot be traced to a call"
 
 

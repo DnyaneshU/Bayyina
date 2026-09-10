@@ -1433,7 +1433,7 @@ thresholds and a middle band.
 
 **Interface produced:** `build_pack(records, caller_ref, language) -> EvidencePack`
 
-- [ ] **Write the failing tests**
+- [x] **Write the failing tests**
 
 ```python
 def test_generator_rejects_anything_but_evaluation_records():
@@ -1463,10 +1463,10 @@ def test_pack_renders_in_every_supported_language(rent_eval):
         assert build_pack([rent_eval], "x", lang).render_text().strip()
 ```
 
-- [ ] Implement `build_pack` accepting **only** `EvaluationRecord` instances —
+- [x] Implement `build_pack` accepting **only** `EvaluationRecord` instances —
       raise `TypeError` otherwise. Jinja templates only; **no LLM import may exist
       in this module**
-- [ ] Add a test asserting the `evidence` package imports no LLM client
+- [x] Add a test asserting the `evidence` package imports no LLM client
 
 - [x] Implement `build_pack` accepting **only** `EvaluationRecord` instances.
       Every shape a composed answer plausibly arrives in is tested — a string, a
@@ -1530,10 +1530,12 @@ source in under a minute. **Time this with a real person.**
 
 ## T2.7 — Web checker v2 — ✅ except the three-language switcher (blocked on translation)
 
-- [ ] Full flow: property details → automatic comparable → verdict → pack download
-- [ ] Render the `HUMAN_REVIEW_REQUIRED` state properly — **it is a feature, not
+- [x] Full flow: property details → automatic comparable → verdict → pack download
+- [x] Render the `HUMAN_REVIEW_REQUIRED` state properly — **it is a feature, not
       an error page**
-- [ ] Language switcher for all three languages
+- [ ] Language switcher for all three languages — **BLOCKED.** Needs reviewed
+      ar/ml locales. Machine translation is refused by test (D-099); the
+      machinery is ready and waiting on a native speaker.
 
 **DoD:** The complete Mode A journey works without a phone call.
 
@@ -1542,6 +1544,12 @@ source in under a minute. **Time this with a real person.**
 ## T2.8 — Comprehension test ⚠ CUSTOMER GATE — BLOCKED on ar/ml templates
 
 **No code. This is the customer-first gate.**
+
+**BLOCKED ON A TRANSLATOR, not on engineering.** `build_pack(...,
+allow_draft=True)` renders an unreviewed template so this gate can run
+before approval, and `_TRANSLATION_STATUS` keeps it undeliverable until
+it passes. What is missing is the ar/ml templates themselves, which a
+native speaker must write (D-099).
 
 - [ ] Give the Malayalam pack to someone who reads Malayalam and **not** English.
       Ask them: what is the answer, and what do you do next?
@@ -1639,7 +1647,7 @@ twice without error. G4 is asserted, not assumed.
 **A webhook that hangs during a live call produces dead air, and the caller hangs
 up.** Every tool needs a defined failure behaviour and a line for the agent to say.
 
-- [ ] Define the taxonomy, and for each: HTTP status, agent behaviour, spoken line
+- [x] Define the taxonomy, and for each: HTTP status, agent behaviour, spoken line
 
 | Failure | Status | The agent says |
 |---|---|---|
@@ -1649,10 +1657,10 @@ up.** Every tool needs a defined failure behaviour and a line for the agent to s
 | SMS dispatch failed | 502 | *"I couldn't text that through. I can read out the key points, or try another number."* |
 | Corpus unsigned at boot | — | Service does not start. No call is answered |
 
-- [ ] Add explicit timeouts to every outbound call
+- [x] Add explicit timeouts to every outbound call
 - [ ] Add `Idempotency-Key` to `/evidence-pack`, `/dispatch` and `/deadline`;
       **test that a replayed key returns the prior result rather than acting twice**
-- [ ] Add rate limiting to public endpoints
+- [x] Add rate limiting to public endpoints
 - [ ] Write the failure lines into the T0.6 script set, in all three languages
 
 **DoD:** Every tool has a tested failure path and a spoken line. **A replayed

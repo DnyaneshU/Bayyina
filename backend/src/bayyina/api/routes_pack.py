@@ -18,6 +18,7 @@ print it, so it ships now rather than waiting behind a font problem.
 
 from __future__ import annotations
 
+import logging
 import re
 
 from fastapi import APIRouter, Header, HTTPException, Request
@@ -25,8 +26,14 @@ from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..evidence.pack import UnsupportedLanguageError, build_pack, supported_languages
+from ..registry.evaluator import EvaluationRecord, OutcomeState
+from ..store.cases import Cases
+from ..store.db import Store
 from ..store.idempotency import Idempotency, IdempotencyConflictError
+from .errors import Failure, behaviour
 from .routes_evaluate import EvaluateRequest, evaluate_request
+
+logger = logging.getLogger("bayyina")
 
 router = APIRouter()
 
@@ -152,9 +159,14 @@ def evidence_pack(
     except UnsupportedLanguageError as exc:
         # 422, not 500. The request named a language we do not have; that is
         # something the caller can act on, and the message says what we do have.
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=behaviour(Failure.UNSUPPORTED_LANGUAGE).status,
+            detail=str(exc),
+        ) from exc
 
     text = pack.render_text()
+    _keep(request, body, record, pack.pack_id, text)
+
     if idempotency_key is not None:
         store.remember(
             idempotency_key,
@@ -164,6 +176,52 @@ def evidence_pack(
             response=text,
         )
     return _as_download(text, body.caller_ref, replayed=False)
+
+
+def _keep(
+    request: Request,
+    body: PackRequest,
+    record: EvaluationRecord,
+    pack_id: str,
+    text: str,
+) -> None:
+    """Store the document, and open a case when it needs a person.
+
+    Two things happen here that did not before, and the second is the point.
+
+    **The rendered pack is stored.** A pack somebody was handed is a record of
+    what they were told. Re-rendering it later would produce a different document
+    under the same reference the first time a rule is re-signed.
+
+    **A `HUMAN_REVIEW_REQUIRED` outcome opens a case.** Until now that state
+    produced an honest document and reached nobody: the service said "this needs
+    a person to look at it" and no person was ever told. The case is created
+    `awaiting_review` — `Cases.create` has no parameter that could make it
+    anything else (G4) — so there is a queue with the thing in it.
+
+    Failing to record must not fail the response. The caller has a correct
+    document in their hands; losing our copy of it is our problem to see in the
+    logs, not a reason to take their answer away.
+    """
+    store: Store = request.app.state.store
+    call_id = body.caller_ref
+
+    try:
+        case_id = None
+        if record.state is OutcomeState.HUMAN_REVIEW_REQUIRED:
+            case_id = Cases(store).create(record, call_id=call_id).case_id
+
+        with store.transaction() as db:
+            db.execute(
+                """
+                insert into evidence_packs
+                    (pack_id, call_id, case_id, language, body, signature)
+                values (?, ?, ?, ?, ?, ?)
+                """,
+                (pack_id, call_id, case_id, body.language, text, record.rule_signature),
+            )
+    except Exception:  # noqa: BLE001 - see the docstring
+        logger.exception("could not record the evidence pack for %s", call_id)
 
 
 def _as_download(text: str, caller_ref: str, *, replayed: bool) -> PlainTextResponse:

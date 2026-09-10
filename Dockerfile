@@ -45,9 +45,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-COPY backend/pyproject.toml ./
+COPY backend/pyproject.toml backend/constraints.txt ./
 COPY backend/src/ ./src/
-RUN pip install --no-cache-dir .
+# The same pinned set CI tested against. Installing unpinned here would ship an
+# image built from dependencies nothing had run the suite against.
+RUN pip install --no-cache-dir -c constraints.txt .
 
 # THE CORPUS. Copied explicitly and verified below: an image that ships an
 # unsigned or tampered rule must fail to build, not fail in front of a caller.

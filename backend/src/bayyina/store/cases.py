@@ -22,6 +22,8 @@ import sqlite3
 from dataclasses import dataclass
 from uuid import uuid4
 
+from .db import Store
+
 #: Where a case starts, and the only status `create()` can produce.
 INITIAL_STATUS = "awaiting_review"
 
@@ -75,8 +77,8 @@ def _row_to_case(row: sqlite3.Row) -> Case:
 
 
 class Cases:
-    def __init__(self, db: sqlite3.Connection) -> None:
-        self._db = db
+    def __init__(self, store: Store) -> None:
+        self._store = store
 
     def create(self, record, call_id: str) -> Case:
         """Open a case from an evaluation record.
@@ -99,9 +101,8 @@ class Cases:
             created_at="",
         )
 
-        try:
-            self._db.execute("begin")
-            self._db.execute(
+        with self._store.transaction() as db:
+            db.execute(
                 """
                 insert into cases (case_id, call_id, status, rule_id, eval_id,
                                    outcome_state)
@@ -116,19 +117,15 @@ class Cases:
                     case.outcome_state,
                 ),
             )
-            self._db.execute(
+            db.execute(
                 "insert into audit (call_id, case_id, event, detail) values (?, ?, ?, ?)",
                 (call_id, case.case_id, "case_opened", case.rule_id),
             )
-            self._db.execute("commit")
-        except sqlite3.Error:
-            self._db.execute("rollback")
-            raise
 
         return self.get(case.case_id)
 
     def get(self, case_id: str) -> Case:
-        row = self._db.execute("select * from cases where case_id = ?", (case_id,)).fetchone()
+        row = self._store.execute("select * from cases where case_id = ?", (case_id,)).fetchone()
         if row is None:
             raise UnknownCaseError(f"no case {case_id!r}")
         return _row_to_case(row)
@@ -136,7 +133,7 @@ class Cases:
     def for_call(self, call_id: str) -> list[Case]:
         return [
             _row_to_case(row)
-            for row in self._db.execute(
+            for row in self._store.execute(
                 "select * from cases where call_id = ? order by created_at", (call_id,)
             )
         ]
@@ -166,10 +163,9 @@ class Cases:
 
     def _move(self, case_id: str, status: str, *, officer: str, decided: bool) -> None:
         self.get(case_id)  # raises UnknownCaseError rather than updating nothing
-        try:
-            self._db.execute("begin")
+        with self._store.transaction() as db:
             if decided:
-                self._db.execute(
+                db.execute(
                     """
                     update cases
                        set status = ?, updated_at = datetime('now'),
@@ -179,18 +175,14 @@ class Cases:
                     (status, officer, case_id),
                 )
             else:
-                self._db.execute(
+                db.execute(
                     "update cases set status = ?, updated_at = datetime('now') where case_id = ?",
                     (status, case_id),
                 )
-            self._db.execute(
+            db.execute(
                 """
                 insert into audit (call_id, case_id, event, detail)
                 select call_id, case_id, ?, ? from cases where case_id = ?
                 """,
                 (f"status_{status}", officer, case_id),
             )
-            self._db.execute("commit")
-        except sqlite3.Error:
-            self._db.execute("rollback")
-            raise

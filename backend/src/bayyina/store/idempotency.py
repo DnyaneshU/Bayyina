@@ -23,7 +23,8 @@ that a loud error instead of a data leak.
 from __future__ import annotations
 
 import hashlib
-import sqlite3
+
+from .db import Store
 
 
 class IdempotencyConflictError(RuntimeError):
@@ -43,8 +44,8 @@ def fingerprint(payload: bytes | str) -> str:
 
 
 class Idempotency:
-    def __init__(self, db: sqlite3.Connection) -> None:
-        self._db = db
+    def __init__(self, store: Store) -> None:
+        self._store = store
 
     def stored(self, key: str, *, operation: str, request: bytes | str) -> str | None:
         """The earlier response for this key, or None if it is new.
@@ -53,7 +54,7 @@ class Idempotency:
         request, which is a client bug that must not be answered with somebody
         else's data.
         """
-        row = self._db.execute(
+        row = self._store.execute(
             "select operation, request_fingerprint, response from idempotency where key = ?",
             (key,),
         ).fetchone()
@@ -90,12 +91,12 @@ class Idempotency:
         that window needs a lock, not a table, and the window is the length of
         one request.
         """
-        self._db.execute(
-            """
-            insert or ignore into idempotency
-                (key, call_id, operation, request_fingerprint, response)
-            values (?, ?, ?, ?, ?)
-            """,
-            (key, call_id, operation, fingerprint(request), response),
-        )
-        self._db.commit()
+        with self._store.transaction() as db:
+            db.execute(
+                """
+                insert or ignore into idempotency
+                    (key, call_id, operation, request_fingerprint, response)
+                values (?, ?, ?, ?, ?)
+                """,
+                (key, call_id, operation, fingerprint(request), response),
+            )

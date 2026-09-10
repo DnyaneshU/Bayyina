@@ -14,6 +14,8 @@ latency budget is met without a cache.
 from __future__ import annotations
 
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -28,8 +30,9 @@ from bayyina.registry.loader import load_rules
 from bayyina.registry.schema import ApprovalStatus
 from bayyina.rules_logic.errors import RuleInputError, RuleLogicError
 from bayyina.settings import Settings, get_settings
-from bayyina.store.db import get_db, run_migrations
+from bayyina.store.db import Store, run_migrations
 
+from .errors import Failure, behaviour
 from .rate_limit import add_rate_limiting
 from .routes_evaluate import router as evaluate_router
 from .routes_pack import router as pack_router
@@ -76,7 +79,7 @@ def _register_error_handlers(app: FastAPI) -> None:
         # meant to catch it, so it is logged at error level rather than absorbed.
         logger.error("rule logic failed: %s", exc)
         return JSONResponse(
-            status_code=500,
+            status_code=behaviour(Failure.RULE_EVALUATION_ERROR).status,
             content={"detail": "A rule could not be applied. This has been logged."},
         )
 
@@ -102,10 +105,29 @@ def create_app(
     # a startup event that raises still leaves a constructed app object behind.
     rules = load_rules(rules_dir if rules_dir is not None else settings.rules_dir)
 
+    @asynccontextmanager
+    async def lifespan(built: FastAPI) -> AsyncIterator[None]:
+        """Nothing to open, one thing to close.
+
+        The corpus, the audit log and the case store are all opened in
+        `create_app` rather than here on purpose: a startup event that raises
+        still leaves a constructed application behind, and G7 requires that a
+        bad corpus produce *no* app at all. Shutdown is different — it has to
+        run after the last request, which is exactly what a lifespan is for.
+
+        `on_event("shutdown")` would do the same job and is deprecated; it also
+        emitted a warning on every one of the 78 tests that builds an app.
+        """
+        yield
+        # A WAL left unclosed outlives the process, and the next reader opens a
+        # database that needs recovery rather than one that was closed.
+        built.state.store.close()
+
     app = FastAPI(
         title="Bayyina",
         description=DESCRIPTION,
         version="0.1.0",
+        lifespan=lifespan,
     )
 
     app.state.settings = settings
@@ -126,8 +148,11 @@ def create_app(
     # because a schema that lags the code is a failure at the first write, and
     # they are idempotent so every boot can do it.
     store_path = Path(case_db) if case_db is not None else Path(settings.data_dir) / "cases.db"
-    app.state.store = get_db(store_path)
-    applied = run_migrations(app.state.store)
+    # A path, not a connection. FastAPI runs sync handlers on a threadpool, and
+    # a connection shared between them loses writes and serves stale reads
+    # (D-095); `Store` opens one per thread.
+    app.state.store = Store(store_path)
+    applied = run_migrations(app.state.store.connection)
     if applied:
         logger.info("case store migrated: %s", ", ".join(applied))
 

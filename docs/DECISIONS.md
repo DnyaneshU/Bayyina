@@ -1441,3 +1441,109 @@ The check that works reads each documented example against the signed rule it
 names: every input must be one the rule declares, and every required
 non-derived input must be present. No database, no network, and it fails on
 exactly the mistake the round-trip misses.
+
+### D-095 · One SQLite connection per thread, never one shared
+**2026-09-10** — The case store opened one connection at boot and let every
+handler use it. FastAPI runs sync handlers on a threadpool, and that design fails
+twice over. Both were measured, not reasoned about.
+
+**Writes trampled each other.** Four threads each opening a transaction on one
+connection lost **72 of 100 rows** and raised `cannot start a transaction within
+a transaction`. A transaction is state on the *connection*, not on the statement.
+SQLite's own locking prevents file corruption and does nothing about this.
+
+**Then reads went stale.** A lock around writes fixed the first bug and revealed
+the second: a handler that wrote a row and read it back got nothing, because once
+another thread opened a transaction on that connection, *every* read on it ran
+inside that thread's older snapshot. The symptom was `no case 'case_844e1d0dedf2'`
+for a case committed microseconds earlier — a caller told their case was open when
+it was not.
+
+A connection per thread fixes both by construction. WAL lets readers run through
+a write, SQLite serialises the writers, and `busy_timeout` makes the loser wait.
+`Store` also closes every connection it handed out, because a WAL left open
+outlives the process and the next reader finds a database needing recovery.
+
+The regression tests run four threads against the real store. Reverting to a
+shared connection turns two of them red.
+
+### D-096 · The failure taxonomy is the behaviour, not a document beside it
+**2026-09-10** — `errors.py` declared a status for every failure and the agent
+scripts are generated from it — and **nothing in `src/` imported it.** Every route
+hardcoded its own number. The two agreed by coincidence, and would have drifted
+the first time anyone changed one.
+
+That drift is not cosmetic: the scripts tell the agent that market data absent is
+a 503 it should talk through. A route returning something else mid-call produces
+an unhandled failure while a caller is listening.
+
+The four routes now read `behaviour(Failure.X).status`, and a test asserts both
+that the codes match and that those files still import the taxonomy — because
+wiring is undone by anyone typing a number back in.
+
+### D-097 · "This needs a person" now reaches a person
+**2026-09-10** — `HUMAN_REVIEW_REQUIRED` produced an honest document and reached
+nobody. The service said a person should look at this, and no person was ever
+told. Producing careful wording and dropping it on the floor is not honesty; it
+is the same silence better phrased.
+
+A pack for that outcome now opens a case, `awaiting_review` — `Cases.create` has
+no parameter that could make it anything else (G4). An answered question opens
+nothing, because a queue full of answered questions is a queue nobody reads.
+
+The rendered pack is stored alongside it. A pack somebody was handed is a record
+of what they were told, and re-rendering it later would produce a different
+document under the same reference the first time a rule is re-signed.
+
+**Failing to record does not fail the response.** The caller has a correct
+document in their hands; losing our copy is ours to find in the logs.
+
+### D-098 · Floors say what we need, constraints say what installs
+**2026-09-10** — D-087 fixed the test that Starlette 1.6 broke and left the cause
+alone: unpinned dependencies mean every install resolves whatever was published
+that morning, so a green build can turn red with nobody touching it.
+
+`constraints.txt` pins the resolution; `pyproject.toml` keeps the floors, because
+those state what the code actually requires. CI, the Dockerfile and the developer
+all install with `-c constraints.txt`, so the image ships what the suite ran
+against.
+
+Refreshing is a deliberate act: `scripts/refresh_constraints.py` re-resolves
+inside `python:3.11-slim` — the runtime, not the developer's machine, which on
+this project is Windows and Python 3.13. `--check` is cheap and asks only whether
+every declared dependency is pinned. Whether newer versions exist is not a
+question CI should ask; the answer changes whenever a stranger publishes a
+release, which is the whole reason the file exists.
+
+### D-099 · The translation gate, and why the drafts were backed out
+**2026-09-10** — Arabic and Malayalam block T2.7 and T2.8, and T2.8 is a deadlock:
+the comprehension gate cannot run without a document to put in front of a reader.
+So the drafts were written — pack templates, 106 interface keys, labels, month
+names — gated behind a marker so nothing could be delivered.
+
+**Then a test said no.** `locales.test.ts` requires each marker to state that
+*machine translation is not acceptable*, and the drafts were exactly that. That
+rule is right and it is not ours to relax: this document tells someone what their
+landlord may lawfully charge, and a plausible-sounding mistranslation is worse
+than no document, because the reader has no way to tell. Every machine-authored
+string was removed.
+
+What stays is the machinery, which is what was actually missing:
+
+* `_TRANSLATION_STATUS` gates delivery — a template appearing on disk no longer
+  makes a language servable, and removing the marker is the act of approval;
+* `build_pack(..., allow_draft=True)` renders an unreviewed template so the
+  comprehension gate can be run before approval, and nothing serving a caller
+  passes it;
+* `label()`, `condition()` and `written_date()` take a language and **raise**
+  rather than falling back, so a translator's first missing string fails loudly
+  instead of producing Arabic prose with English scattered through it;
+* the markers say what to check and in what order.
+
+The gate is tested with a temporary language rather than a real draft, because it
+has to work *before* a translator arrives — the failure it prevents is an
+unreviewed template becoming deliverable the moment someone drops in a file.
+
+**T2.7's language switcher and T2.8 remain blocked on a person, by this project's
+own rule.** That is the honest state, and it is now a short piece of work for
+whoever that person is rather than an open-ended one.

@@ -230,3 +230,116 @@ def test_a_pack_without_market_data_still_works(client: TestClient):
     blocked by a dataset the request never touches (D-074).
     """
     assert client.post("/evidence-pack", json=BODY).status_code == 200
+
+
+# --- What the service keeps ---------------------------------------------------
+
+
+def test_the_pack_is_stored_as_a_record_of_what_the_person_was_told(client: TestClient):
+    """Re-rendering later would produce a different document under the same
+    reference the first time a rule is re-signed."""
+    text = client.post("/evidence-pack", json=BODY).text
+
+    # The newest row: this module shares one client, so several tests write
+    # packs for the same reference and `fetchone()` on an unordered query
+    # returns whichever came first.
+    stored = client.app.state.store.execute(
+        "select body, language, signature from evidence_packs "
+        "where call_id = ? order by rowid desc limit 1",
+        ("BYN-4821",),
+    ).fetchone()
+
+    assert stored is not None, "the pack was handed over and never recorded"
+    assert stored["body"] == text
+    assert stored["language"] == "en"
+    assert stored["signature"].startswith("sha256:")
+
+
+def test_human_review_opens_a_case_for_a_person_to_pick_up(client: TestClient):
+    """The state said "this needs a person" and no person was ever told.
+
+    Producing an honest document and dropping it on the floor is not honesty; it
+    is the same silence with better wording.
+    """
+    thin = {
+        **BODY,
+        "caller_ref": "BYN-REVIEW",
+        "input_sources": {
+            **BODY["input_sources"],
+            "market_average_rent": "dld_open_rent_contracts_derived",
+        },
+        "market": {"contract_count": 0, "snapshot_id": "2026-Q3"},
+    }
+    assert "THIS NEEDS A PERSON" in client.post("/evidence-pack", json=thin).text
+
+    case = client.app.state.store.execute(
+        "select * from cases where call_id = ?", ("BYN-REVIEW",)
+    ).fetchone()
+
+    assert case is not None, "human review reached no queue"
+    assert case["status"] == "awaiting_review"
+    assert case["outcome_state"] == "HUMAN_REVIEW_REQUIRED"
+
+
+def test_an_answered_question_opens_no_case(client: TestClient):
+    """A queue full of answered questions is a queue nobody reads."""
+    client.post("/evidence-pack", json={**BODY, "caller_ref": "BYN-CLEAR"})
+
+    case = client.app.state.store.execute(
+        "select * from cases where call_id = ?", ("BYN-CLEAR",)
+    ).fetchone()
+    assert case is None
+
+
+def test_the_case_and_the_pack_are_linked(client: TestClient):
+    """An officer opening the queue needs the document the caller is holding."""
+    thin = {
+        **BODY,
+        "caller_ref": "BYN-LINK",
+        "input_sources": {
+            **BODY["input_sources"],
+            "market_average_rent": "dld_open_rent_contracts_derived",
+        },
+        "market": {"contract_count": 0, "snapshot_id": "2026-Q3"},
+    }
+    client.post("/evidence-pack", json=thin)
+
+    row = client.app.state.store.execute(
+        """
+        select p.pack_id, p.case_id, c.status
+          from evidence_packs p join cases c on c.case_id = p.case_id
+         where p.call_id = ?
+        """,
+        ("BYN-LINK",),
+    ).fetchone()
+
+    assert row is not None, "the pack is not reachable from the case"
+    assert row["status"] == "awaiting_review"
+
+
+def test_a_storage_failure_does_not_take_the_answer_away(client: TestClient, monkeypatch):
+    """The caller has a correct document in their hands.
+
+    Losing our copy is ours to find in the logs, not a reason to fail their
+    request.
+    """
+    from bayyina.api import routes_pack
+
+    def explode(*_args, **_kwargs):
+        raise RuntimeError("disk on fire")
+
+    monkeypatch.setattr(routes_pack.Cases, "create", explode)
+
+    thin = {
+        **BODY,
+        "caller_ref": "BYN-BOOM",
+        "input_sources": {
+            **BODY["input_sources"],
+            "market_average_rent": "dld_open_rent_contracts_derived",
+        },
+        "market": {"contract_count": 0, "snapshot_id": "2026-Q3"},
+    }
+    response = client.post("/evidence-pack", json=thin)
+
+    assert response.status_code == 200
+    assert "THIS NEEDS A PERSON" in response.text

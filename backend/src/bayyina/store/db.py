@@ -22,8 +22,13 @@ forward migration.
 
 from __future__ import annotations
 
+import contextlib
 import sqlite3
+import threading
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from pathlib import Path
+from typing import Any
 
 #: Where the numbered `.sql` files live. Read from the installed package, so a
 #: container that shipped without them fails at migration time rather than
@@ -52,9 +57,11 @@ def get_db(path: Path | str) -> sqlite3.Connection:
     connection = sqlite3.connect(
         path,
         timeout=BUSY_TIMEOUT_MS / 1000,
-        # The API runs handlers on a threadpool, so a connection made on one
-        # thread is used on another. Serialising access is the caller's job and
-        # SQLite's own locking does it here.
+        # `Store` opens one connection per thread, so cross-thread use should
+        # not happen. This stays False only so that shutdown, which runs on a
+        # different thread from the handlers, can close them all. Sharing a
+        # connection between threads is the bug this whole module is shaped
+        # around - see `Store`.
         check_same_thread=False,
     )
     connection.row_factory = sqlite3.Row
@@ -152,6 +159,107 @@ def run_migrations(db: sqlite3.Connection) -> list[str]:
         applied.append(migration.name)
 
     return applied
+
+
+class Store:
+    """The case store: **one connection per thread**, never one shared between.
+
+    This class exists because of two measured bugs, not a theory. FastAPI runs
+    sync handlers on a threadpool, so the obvious design — open one connection at
+    boot and let every handler use it — fails twice over:
+
+    **Writes trample each other.** Four threads each opening a transaction on one
+    connection lost 72 of 100 rows and raised `cannot start a transaction within
+    a transaction`. A transaction is state on the *connection*, not on the
+    statement, so two threads interleaving begin/commit corrupt each other's
+    units of work. SQLite's own locking prevents file corruption and does nothing
+    about this.
+
+    **Reads go stale.** Adding a lock around writes fixed the first bug and
+    revealed the second: a handler that writes a row and reads it back could get
+    nothing, because once another thread opened a transaction on that same
+    connection, *every* read on it ran inside that thread's older snapshot. The
+    symptom was `no case 'case_844e1d0dedf2'` for a case that had just been
+    committed — a caller told their case was open when it was not.
+
+    A connection per thread fixes both by construction: transactions are private
+    to the thread that opened them, and WAL lets readers run through a write
+    without blocking. SQLite serialises the writers itself, and `busy_timeout`
+    makes the loser wait rather than raise.
+    """
+
+    def __init__(self, path: Path | str) -> None:
+        self._path = Path(path)
+        self._local = threading.local()
+        # Every connection handed out, so shutdown can close them all. Guarded
+        # because threads append to it concurrently.
+        self._opened: list[sqlite3.Connection] = []
+        self._registry = threading.Lock()
+        self._closed = False
+
+    @property
+    def path(self) -> Path:
+        return self._path
+
+    @property
+    def connection(self) -> sqlite3.Connection:
+        """This thread's connection, opened on first use."""
+        existing: sqlite3.Connection | None = getattr(self._local, "connection", None)
+        if existing is not None:
+            return existing
+
+        if self._closed:
+            raise StoreError("the case store is closed")
+
+        connection = get_db(self._path)
+        self._local.connection = connection
+        with self._registry:
+            self._opened.append(connection)
+        return connection
+
+    def execute(self, sql: str, params: Sequence[Any] = ()) -> sqlite3.Cursor:
+        """Read, on this thread's own connection."""
+        return self.connection.execute(sql, params)
+
+    @contextmanager
+    def transaction(self) -> Iterator[sqlite3.Connection]:
+        """A unit of work, committed or rolled back whole.
+
+        `begin immediate` rather than `begin`: it takes SQLite's write lock at
+        the start instead of on the first write, so contention waits out the
+        busy timeout at a point where nothing has happened yet. A deferred
+        transaction that fails to upgrade half-way through has already done part
+        of its work.
+        """
+        connection = self.connection
+        connection.execute("begin immediate")
+        try:
+            yield connection
+            connection.execute("commit")
+        except BaseException:
+            # BaseException, not Exception: a cancelled request must not leave a
+            # transaction open holding SQLite's write lock against every other
+            # thread.
+            if connection.in_transaction:
+                connection.execute("rollback")
+            raise
+
+    def close(self) -> None:
+        """Close every connection this store handed out.
+
+        Without this the `-wal` and `-shm` files outlive the process, and the
+        next reader opens a database that needs recovery rather than one that
+        was closed cleanly.
+        """
+        with self._registry:
+            self._closed = True
+            for connection in self._opened:
+                # Closing an already-closed connection is not an error worth
+                # propagating out of shutdown.
+                with contextlib.suppress(sqlite3.Error):
+                    connection.close()
+            self._opened.clear()
+        self._local = threading.local()
 
 
 def table_exists(db: sqlite3.Connection, name: str) -> bool:

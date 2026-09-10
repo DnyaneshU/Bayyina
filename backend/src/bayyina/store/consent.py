@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import sqlite3
 
+from .db import Store
+
 #: Written when a person withdraws consent for good. Nothing supersedes it.
 OPT_OUT = "opt_out"
 
@@ -27,8 +29,8 @@ OPT_OUT = "opt_out"
 class Consent:
     """The consent log for one database."""
 
-    def __init__(self, db: sqlite3.Connection) -> None:
-        self._db = db
+    def __init__(self, store: Store) -> None:
+        self._store = store
 
     def record(self, call_id: str, *, granted: bool, note: str | None = None) -> None:
         """Log a grant or a withdrawal.
@@ -37,11 +39,11 @@ class Consent:
         written, because the log records what happened rather than what counted.
         """
         event = "granted" if granted else "withdrawn"
-        self._db.execute(
-            "insert into consent (call_id, event, note) values (?, ?, ?)",
-            (call_id, event, note),
-        )
-        self._db.commit()
+        with self._store.transaction() as db:
+            db.execute(
+                "insert into consent (call_id, event, note) values (?, ?, ?)",
+                (call_id, event, note),
+            )
 
     def opt_out(self, call_id: str, *, note: str | None = None) -> None:
         """Withdraw consent permanently, and say so in the audit trail.
@@ -51,20 +53,19 @@ class Consent:
         leaves nothing to point at when someone asks why the texts stopped, or
         why they did not.
         """
-        try:
-            self._db.execute("begin")
-            self._db.execute(
+        with self._store.transaction() as db:
+            db.execute(
                 "insert into consent (call_id, event, note) values (?, ?, ?)",
                 (call_id, OPT_OUT, note),
             )
-            self._db.execute(
+            db.execute(
                 "insert into audit (call_id, event, detail) values (?, ?, ?)",
                 (call_id, OPT_OUT, note or "consent withdrawn permanently"),
             )
             # Anything scheduled for this person stops. An armed deadline is a
             # future text message, and honouring an opt-out tomorrow is not
             # honouring it.
-            self._db.execute(
+            db.execute(
                 """
                 update deadlines
                    set cancelled_at = datetime('now')
@@ -74,24 +75,20 @@ class Consent:
                 """,
                 (call_id,),
             )
-            self._db.execute("commit")
-        except sqlite3.Error:
-            self._db.execute("rollback")
-            raise
 
     def has(self, call_id: str) -> bool:
         """Whether we may contact this person.
 
         False the moment an opt-out exists, whatever was written after it.
         """
-        opted_out = self._db.execute(
+        opted_out = self._store.execute(
             "select 1 from consent where call_id = ? and event = ? limit 1",
             (call_id, OPT_OUT),
         ).fetchone()
         if opted_out is not None:
             return False
 
-        latest = self._db.execute(
+        latest = self._store.execute(
             """
             select event from consent
              where call_id = ?
@@ -105,7 +102,7 @@ class Consent:
     def opted_out(self, call_id: str) -> bool:
         """The absorbing state, asked directly."""
         return (
-            self._db.execute(
+            self._store.execute(
                 "select 1 from consent where call_id = ? and event = ? limit 1",
                 (call_id, OPT_OUT),
             ).fetchone()
@@ -115,5 +112,5 @@ class Consent:
     def history(self, call_id: str) -> list[sqlite3.Row]:
         """Every event for one call, oldest first."""
         return list(
-            self._db.execute("select * from consent where call_id = ? order by id", (call_id,))
+            self._store.execute("select * from consent where call_id = ? order by id", (call_id,))
         )

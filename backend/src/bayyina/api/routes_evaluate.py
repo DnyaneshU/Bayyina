@@ -22,6 +22,8 @@ from bayyina.market.comparables import Comparable, ComparableStatus, ComparableS
 from bayyina.market.normalise import area_key
 from bayyina.registry.evaluator import EvaluationRecord, MarketEvidence
 
+from .errors import Failure, behaviour
+
 router = APIRouter()
 
 
@@ -234,7 +236,7 @@ def _comparables(request: Request) -> ComparableStore:
     store = request.app.state.comparables
     if store is None:
         raise HTTPException(
-            status_code=503,
+            status_code=behaviour(Failure.MARKET_DATA_ABSENT).status,
             detail=(
                 "market comparables are not loaded, so no market figure can be derived. "
                 "Supply `market_average_rent` in `inputs` instead, or build the database "

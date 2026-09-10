@@ -3,23 +3,23 @@
 import pytest
 
 from bayyina.registry.evaluator import Evaluator, MarketEvidence
-from bayyina.store.db import get_db, run_migrations
+from bayyina.store.db import Store, run_migrations
 
 RENT = "rent_increase.dubai.decree_43_2013"
 
 
 @pytest.fixture
-def db(tmp_path):
+def store(tmp_path):
     """A migrated store, one per test.
 
     A file rather than `:memory:`. WAL is the thing under test in one of these
     and an in-memory database silently declines to use it, so the fixture would
     quietly make that assertion meaningless.
     """
-    connection = get_db(tmp_path / "cases.db")
-    run_migrations(connection)
-    yield connection
-    connection.close()
+    store = Store(tmp_path / "cases.db")
+    run_migrations(store.connection)
+    yield store
+    store.close()
 
 
 @pytest.fixture

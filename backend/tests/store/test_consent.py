@@ -13,23 +13,23 @@ from bayyina.store.consent import Consent
 from bayyina.store.deadlines import Deadlines
 
 
-def audit_entries(db, call_id):
-    return list(db.execute("select * from audit where call_id = ?", (call_id,)))
+def audit_entries(store, call_id):
+    return list(store.execute("select * from audit where call_id = ?", (call_id,)))
 
 
-def test_consent_starts_absent(db):
+def test_consent_starts_absent(store):
     """Silence is not agreement."""
-    assert Consent(db).has("call-1") is False
+    assert Consent(store).has("call-1") is False
 
 
-def test_it_is_granted_when_granted(db):
-    Consent(db).record("call-1", granted=True)
-    assert Consent(db).has("call-1") is True
+def test_it_is_granted_when_granted(store):
+    Consent(store).record("call-1", granted=True)
+    assert Consent(store).has("call-1") is True
 
 
-def test_it_can_be_withdrawn_and_granted_again(db):
+def test_it_can_be_withdrawn_and_granted_again(store):
     """An ordinary withdrawal is reversible. Only opt-out is not."""
-    consent = Consent(db)
+    consent = Consent(store)
     consent.record("call-1", granted=True)
     consent.record("call-1", granted=False)
     assert consent.has("call-1") is False
@@ -38,9 +38,9 @@ def test_it_can_be_withdrawn_and_granted_again(db):
     assert consent.has("call-1") is True
 
 
-def test_opt_out_is_irreversible(db):
+def test_opt_out_is_irreversible(store):
     """The whole point. G8."""
-    consent = Consent(db)
+    consent = Consent(store)
     consent.record("call-1", granted=True)
     consent.opt_out("call-1")
 
@@ -49,25 +49,25 @@ def test_opt_out_is_irreversible(db):
     assert consent.has("call-1") is False
 
 
-def test_opt_out_survives_any_number_of_regrants(db):
-    consent = Consent(db)
+def test_opt_out_survives_any_number_of_regrants(store):
+    consent = Consent(store)
     consent.opt_out("call-1")
     for _ in range(5):
         consent.record("call-1", granted=True)
     assert consent.has("call-1") is False
 
 
-def test_opt_out_is_written_to_the_audit_trail(db):
+def test_opt_out_is_written_to_the_audit_trail(store):
     """An opt-out nothing recorded leaves nothing to point at afterwards."""
-    consent = Consent(db)
+    consent = Consent(store)
     consent.record("call-1", granted=True)
     consent.opt_out("call-1")
 
-    assert any(row["event"] == "opt_out" for row in audit_entries(db, "call-1"))
+    assert any(row["event"] == "opt_out" for row in audit_entries(store, "call-1"))
 
 
-def test_opt_out_touches_only_the_call_that_asked(db):
-    consent = Consent(db)
+def test_opt_out_touches_only_the_call_that_asked(store):
+    consent = Consent(store)
     consent.record("call-1", granted=True)
     consent.record("call-2", granted=True)
 
@@ -77,13 +77,13 @@ def test_opt_out_touches_only_the_call_that_asked(db):
     assert consent.has("call-2") is True
 
 
-def test_the_log_keeps_what_happened_even_when_it_did_not_count(db):
+def test_the_log_keeps_what_happened_even_when_it_did_not_count(store):
     """The log records events, not conclusions.
 
     A re-grant after an opt-out changes nothing, and it is still written — so
     the record shows a retry happened rather than hiding it.
     """
-    consent = Consent(db)
+    consent = Consent(store)
     consent.opt_out("call-1")
     consent.record("call-1", granted=True)
 
@@ -92,7 +92,7 @@ def test_the_log_keeps_what_happened_even_when_it_did_not_count(db):
     assert consent.has("call-1") is False
 
 
-def test_nothing_is_due_for_someone_who_opted_out(db, record):
+def test_nothing_is_due_for_someone_who_opted_out(store, record):
     """The outcome, however it is reached.
 
     Honouring an opt-out from tomorrow is not honouring it: an armed deadline is
@@ -107,10 +107,10 @@ def test_nothing_is_due_for_someone_who_opted_out(db, record):
     is what pins the write path, and the read path is pinned in
     `test_due_excludes_anyone_who_opted_out`.
     """
-    consent = Consent(db)
+    consent = Consent(store)
     consent.record("call-1", granted=True)
-    case = Cases(db).create(record, call_id="call-1")
-    deadlines = Deadlines(db)
+    case = Cases(store).create(record, call_id="call-1")
+    deadlines = Deadlines(store)
     deadlines.arm(case.case_id, date.today() + timedelta(days=30), record.rule_id)
 
     assert deadlines.due(date.today() + timedelta(days=60))
@@ -120,19 +120,21 @@ def test_nothing_is_due_for_someone_who_opted_out(db, record):
     assert deadlines.due(date.today() + timedelta(days=60)) == []
 
 
-def test_the_cancellation_and_the_withdrawal_are_one_transaction(db, record):
+def test_the_cancellation_and_the_withdrawal_are_one_transaction(store, record):
     """Either both happened or neither did.
 
     A withdrawal recorded without the cancellation is an opt-out that still
     sends the text.
     """
-    consent = Consent(db)
+    consent = Consent(store)
     consent.record("call-1", granted=True)
-    case = Cases(db).create(record, call_id="call-1")
-    Deadlines(db).arm(case.case_id, date.today() + timedelta(days=30), record.rule_id)
+    case = Cases(store).create(record, call_id="call-1")
+    Deadlines(store).arm(case.case_id, date.today() + timedelta(days=30), record.rule_id)
 
     consent.opt_out("call-1")
 
-    cancelled = db.execute("select cancelled_at from deadlines where call_id = 'call-1'").fetchone()
+    cancelled = store.execute(
+        "select cancelled_at from deadlines where call_id = 'call-1'"
+    ).fetchone()
     assert cancelled["cancelled_at"] is not None
     assert consent.opted_out("call-1") is True

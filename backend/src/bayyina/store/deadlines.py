@@ -17,12 +17,12 @@ the wrong side of midnight.
 
 from __future__ import annotations
 
-import sqlite3
 from dataclasses import dataclass
 from datetime import date
 from uuid import uuid4
 
 from .consent import Consent
+from .db import Store
 
 
 class DeadlineError(RuntimeError):
@@ -45,8 +45,8 @@ class Deadline:
 
 
 class Deadlines:
-    def __init__(self, db: sqlite3.Connection) -> None:
-        self._db = db
+    def __init__(self, store: Store) -> None:
+        self._store = store
 
     def arm(self, case_id: str, due: date | str, rule_id: str) -> Deadline:
         """Schedule a reminder, if we are allowed to contact this person.
@@ -55,12 +55,14 @@ class Deadlines:
         that must agree are two arguments that eventually will not, and a
         deadline armed against the wrong call is a text to the wrong person.
         """
-        row = self._db.execute("select call_id from cases where case_id = ?", (case_id,)).fetchone()
+        row = self._store.execute(
+            "select call_id from cases where case_id = ?", (case_id,)
+        ).fetchone()
         if row is None:
             raise DeadlineError(f"no case {case_id!r} to arm a deadline against")
         call_id = row["call_id"]
 
-        if not Consent(self._db).has(call_id):
+        if not Consent(self._store).has(call_id):
             raise NoConsentError(
                 f"no consent to contact {call_id!r}, so no deadline is armed. "
                 f"A reminder is contact, and G8 does not have an exception for "
@@ -76,29 +78,18 @@ class Deadlines:
             due_on=due_on,
         )
 
-        try:
-            self._db.execute("begin")
-            self._db.execute(
+        with self._store.transaction() as db:
+            db.execute(
                 """
                 insert into deadlines (deadline_id, call_id, case_id, rule_id, due_on)
                 values (?, ?, ?, ?, ?)
                 """,
-                (
-                    deadline.deadline_id,
-                    call_id,
-                    case_id,
-                    rule_id,
-                    due_on,
-                ),
+                (deadline.deadline_id, call_id, case_id, rule_id, due_on),
             )
-            self._db.execute(
+            db.execute(
                 "insert into audit (call_id, case_id, event, detail) values (?, ?, ?, ?)",
                 (call_id, case_id, "deadline_armed", due_on),
             )
-            self._db.execute("commit")
-        except sqlite3.Error:
-            self._db.execute("rollback")
-            raise
 
         return deadline
 
@@ -110,7 +101,7 @@ class Deadlines:
         used by a caller who does not.
         """
         when = on.isoformat() if isinstance(on, date) else str(on)
-        rows = self._db.execute(
+        rows = self._store.execute(
             """
             select d.* from deadlines d
              where d.due_on <= ?
@@ -138,15 +129,15 @@ class Deadlines:
         ]
 
     def mark_fired(self, deadline_id: str) -> None:
-        self._db.execute(
-            "update deadlines set fired_at = datetime('now') where deadline_id = ?",
-            (deadline_id,),
-        )
-        self._db.commit()
+        with self._store.transaction() as db:
+            db.execute(
+                "update deadlines set fired_at = datetime('now') where deadline_id = ?",
+                (deadline_id,),
+            )
 
     def cancel(self, deadline_id: str) -> None:
-        self._db.execute(
-            "update deadlines set cancelled_at = datetime('now') where deadline_id = ?",
-            (deadline_id,),
-        )
-        self._db.commit()
+        with self._store.transaction() as db:
+            db.execute(
+                "update deadlines set cancelled_at = datetime('now') where deadline_id = ?",
+                (deadline_id,),
+            )

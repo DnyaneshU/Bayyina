@@ -82,23 +82,65 @@ CONDITION_WORDING: dict[str, str] = {
 }
 
 
+# --- Other languages ----------------------------------------------------------
+#
+# Drafts. The directories under `templates/` carry `_TRANSLATION_STATUS`, so
+# `supported_languages()` excludes them and nothing serves them to a caller.
+#
+# **There is no fallback to English.** A label with no translation raises, the
+# same way a field with no wording at all raises. A document that is Arabic prose
+# with English labels scattered through it is not a translated document; it is a
+# document that looks translated to whoever shipped it and does not to whoever
+# reads it.
+
+LABELS: dict[str, dict[str, str]] = {
+    "en": {name: wording[0] for name, wording in WORDING.items()},
+    # Other languages are added by whoever writes their template. Machine
+    # translation is not acceptable here: this document tells someone what their
+    # landlord may lawfully charge, and a plausible-sounding mistranslation is
+    # worse than no document because the reader cannot tell.
+}
+
+CONDITIONS: dict[str, dict[str, str]] = {
+    "en": dict(CONDITION_WORDING),
+}
+
+#: How a count of days is written. Not a format string with a number dropped in:
+#: languages place the unit differently, and a template assuming "N days"
+#: produces something a reader notices immediately.
+DAYS_WORDING: dict[str, tuple[str, str]] = {
+    "en": ("{n} day", "{n} days"),
+}
+
+
 class MissingWordingError(KeyError):
     """A field reached a document with no decision about how to say it."""
 
 
-def label(name: str) -> str:
-    """What a person is told this field is."""
-    try:
-        return WORDING[name][0]
-    except KeyError:
+def label(name: str, language: str = "en") -> str:
+    """What a person is told this field is, in the language they read.
+
+    **No fallback to English.** A missing translation raises, the same way a
+    field with no wording at all raises. Arabic prose with English labels
+    scattered through it is not a translated document — it is one that looks
+    translated to whoever shipped it and does not to whoever reads it.
+    """
+    if name not in WORDING:
         raise MissingWordingError(
             f"no wording for {name!r}. A field cannot reach a document under its "
-            f"internal name — decide what a resident is told it is, and add it to "
+            f"internal name - decide what a resident is told it is, and add it to "
             f"WORDING in bayyina/evidence/wording.py."
+        )
+    try:
+        return LABELS[language][name]
+    except KeyError:
+        raise MissingWordingError(
+            f"no {language!r} label for {name!r}. Add it to LABELS in "
+            f"bayyina/evidence/wording.py, or the pack is half in one language."
         ) from None
 
 
-def value(name: str, raw: object) -> str:
+def value(name: str, raw: object, language: str = "en") -> str:
     """The value, written the way GLOSSARY section 4 requires."""
     if raw is None:
         return "—"
@@ -111,21 +153,27 @@ def value(name: str, raw: object) -> str:
         # would imply the input was that precise.
         return f"{Decimal(str(raw)) * 100:.1f}%"
     if shape is Shape.DATE:
-        return written_date(raw)  # type: ignore[arg-type]
+        return written_date(raw, language)  # type: ignore[arg-type]
     if shape is Shape.DAYS:
         count = int(raw)
-        return f"{count} day" if count == 1 else f"{count} days"
+        singular, plural = DAYS_WORDING.get(language, DAYS_WORDING["en"])
+        return (singular if count == 1 else plural).format(n=count)
     if name == "band_matched":
-        return f"step {int(raw) + 1}"
+        return f"{int(raw) + 1}"
     return str(raw)
 
 
-def condition(name: str) -> str:
+def condition(name: str, language: str = "en") -> str:
     """What a named condition means, in a sentence."""
-    try:
-        return CONDITION_WORDING[name]
-    except KeyError:
+    if name not in CONDITION_WORDING:
         raise MissingWordingError(
             f"no wording for the condition {name!r}. A condition printed as its "
-            f"own slug tells a reader nothing — add it to CONDITION_WORDING."
+            f"own slug tells a reader nothing - add it to CONDITION_WORDING."
+        )
+    try:
+        return CONDITIONS[language][name]
+    except KeyError:
+        raise MissingWordingError(
+            f"no {language!r} wording for the condition {name!r}. Add it to "
+            f"CONDITIONS in bayyina/evidence/wording.py."
         ) from None

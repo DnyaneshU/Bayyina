@@ -1,0 +1,61 @@
+# Exact versions, so a green build stays green.
+#
+# `pyproject.toml` declares floors (`fastapi>=0.111`) because those state what
+# the code actually needs. Floors alone mean every install resolves whatever was
+# released that morning, and on 2026-09-10 that turned three green suites into
+# three red CI jobs with no change to our source: Starlette 1.6 stopped
+# flattening included routers, and a test reading `app.routes` found nothing
+# (D-087).
+#
+# This file pins the resolution. It is used with `-c` so the floors keep
+# documenting intent while the numbers here decide what installs:
+#
+#     pip install -c constraints.txt -e ".[dev]"
+#
+# **Refreshing is a deliberate act, not a side effect.** To take newer versions:
+#
+#     python scripts/refresh_constraints.py       # resolves and rewrites
+#     pytest                                      # then prove it still works
+#
+# Doing it that way means a dependency break is discovered by whoever chose to
+# upgrade, in a diff that says so, rather than by whoever pushed next.
+#
+# Resolved on Python 3.11 (the runtime in the Dockerfile and in CI). Generated
+# by scripts/refresh_constraints.py — do not hand-edit.
+
+annotated-doc==0.0.5
+annotated-types==0.8.0
+anyio==4.15.1
+certifi==2026.7.22
+click==8.5.0
+coverage==7.16.0
+duckdb==1.5.5
+fastapi==0.141.1
+h11==0.16.0
+httpcore==1.0.9
+httptools==0.8.0
+httpx==0.28.1
+hypothesis==6.168.0
+idna==3.19
+iniconfig==2.3.0
+Jinja2==3.1.6
+MarkupSafe==3.0.3
+packaging==26.3
+pluggy==1.6.0
+pydantic==2.13.5
+pydantic-settings==2.15.0
+pydantic_core==2.46.5
+Pygments==2.21.0
+pytest==9.1.1
+pytest-cov==7.1.0
+python-dotenv==1.2.3
+PyYAML==6.0.3
+ruff==0.16.6
+sortedcontainers==2.4.0
+starlette==1.6.0
+typing-inspection==0.4.4
+typing_extensions==4.16.0
+uvicorn==0.52.4
+uvloop==0.22.1
+watchfiles==1.2.0
+websockets==17.1

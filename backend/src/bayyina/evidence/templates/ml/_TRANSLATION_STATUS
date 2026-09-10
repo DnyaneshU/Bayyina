@@ -1,0 +1,28 @@
+Malayalam evidence pack — not written
+
+There is no `pack.txt.j2` in this directory, so `supported_languages()` does not
+list `ml` and `build_pack(..., language="ml")` raises rather than quietly
+producing an English document. That refusal is deliberate: an English pack for a
+Malayalam reader is a failed delivery, and a silent fallback is how that happens
+without anybody noticing.
+
+**Machine translation is not acceptable here.** This document tells someone what
+their landlord may lawfully charge and what to do next; a plausible-sounding
+mistranslation is worse than no document, because the reader has no way to tell.
+A native Malayalam speaker must write it, working from docs/GLOSSARY.md:
+
+  * the section 3 disclosures must say the same thing they say in English -
+    "not legal advice" must not soften into "for information only";
+  * the section 1 banned vocabulary has no equivalent creeping in - nothing
+    that reads as advice, a ruling, or a promised outcome;
+  * "the most they can charge" must not read as a fixed official figure.
+
+The machinery is ready for you. Adding `pack.txt.j2` here is all that is needed:
+
+  * labels come from `LABELS["ml"]` in `bayyina/evidence/wording.py`, and a
+    missing one raises rather than falling back to English, so the pack cannot
+    come out half in one language;
+  * dates come from `MONTHS["ml"]`, so they render in this script rather
+    than printing "September" in the middle of Malayalam text;
+  * while this file is present the language stays undeliverable, and removing
+    it is the act of approval. Run the comprehension gate (T2.8) first.
