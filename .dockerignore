@@ -26,6 +26,10 @@ backend/static/
 
 # --- Data: large and regenerable. The parquet alone is 200 MB ---------------
 backend/data/
+# ...except the serving database, which the image must carry. 1.3 MB of
+# comparables, areas and provenance. The build database beside it is 359 MB of
+# contract rows the request path never reads, and stays out.
+!backend/data/comparables.duckdb
 
 # --- Not needed at runtime --------------------------------------------------
 backend/tests/

@@ -3,6 +3,9 @@
     "name": "Bayyina",
     "tagline": "Check a Dubai rent increase against the published rules."
   },
+  "language": {
+    "switcher": "Language"
+  },
   "outcome": {
     "clear": "Clear",
     "clearWithConditions": "Clear, with one condition",
@@ -71,7 +74,8 @@
   "condition": {
     "heading": "This answer rests on one thing we could not check",
     "market_average_not_derived": "You gave us the market average. We applied the rule to that figure exactly, but we have not checked that it is the right average for your property.",
-    "thin_comparable_data": "We found only {{count}} registered contracts for a property like yours. That is enough to apply the rule, but thinner than we would like."
+    "thin_comparable_data": "We found only {{count}} registered contracts for a property like yours. That is enough to apply the rule, but thinner than we would like.",
+    "market_data_ageing": "Our figures come from tenancy contracts registered up to {{date}}. Rents in Dubai typically move a few percent over that time, so treat this as close rather than exact."
   },
   "review": {
     "heading": "This needs a person to look at it",

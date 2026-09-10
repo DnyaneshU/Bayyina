@@ -124,3 +124,140 @@ def test_neither_platform_config_uses_a_sleeping_free_tier():
 
     render = yaml.safe_load((ROOT / "render.yaml").read_text(encoding="utf-8"))
     assert render["services"][0]["plan"] != "free"
+
+
+# --- The development proxy ---------------------------------------------------
+
+
+def test_the_dev_proxy_forwards_every_backend_route():
+    """A route the proxy does not list 404s against the Vite dev server.
+
+    `/evaluate` was missing, so the interface loaded, the health check resolved,
+    and the one button that matters returned "Request failed (404)". Nothing in
+    either test suite noticed, because each side was correct on its own.
+    """
+    import tempfile
+
+    from fastapi.routing import APIRoute
+
+    from bayyina.api.app import create_app
+
+    config = (ROOT / "frontend" / "vite.config.ts").read_text(encoding="utf-8")
+    app = create_app(audit_path=Path(tempfile.mkdtemp()) / "audit.jsonl")
+
+    served = {
+        route.path
+        for route in app.routes
+        if isinstance(route, APIRoute) and not route.path.startswith("/openapi")
+    }
+    assert served, "no API routes found — has the app changed?"
+
+    missing = [path for path in sorted(served) if f'"{path}"' not in config]
+    assert not missing, (
+        f"these backend routes are not proxied in frontend/vite.config.ts, so they "
+        f"404 in development: {missing}"
+    )
+
+
+# --- Market data in the image -------------------------------------------------
+
+
+def test_the_image_carries_the_serving_database_not_the_build_one(dockerfile):
+    """343 MB of contract rows must not ride along to serve 1,324 numbers.
+
+    The request path reads `comparables`, `areas` and one provenance row. The
+    build database beside them holds 5.3 million individual tenancy records that
+    nothing at runtime touches, and shipping them in a public image would be
+    needless in both size and disclosure.
+    """
+    assert re.search(r"^COPY\s+backend/data/\s+\./data/", dockerfile, re.MULTILINE), (
+        "the image does not copy the data directory"
+    )
+
+    ignored = DOCKERIGNORE.read_text(encoding="utf-8")
+    assert "backend/data/" in ignored, "the data directory must be excluded by default"
+    assert "!backend/data/comparables.duckdb" in ignored, (
+        "the serving database is excluded, so the image would ship with no market data"
+    )
+    assert "!backend/data/market.duckdb" not in ignored, (
+        "the 359 MB build database is being re-included into the image"
+    )
+    assert "!backend/data/raw" not in ignored, "the 200 MB release is being re-included"
+
+
+def test_the_directory_is_copied_rather_than_the_file():
+    """`COPY backend/data/comparables.duckdb` would fail the build when there is
+    no market data — and market data is optional by design (D-074).
+
+    Copying the directory succeeds either way, and `/healthz` reports which
+    happened instead of the image refusing to exist.
+    """
+    dockerfile = DOCKERFILE.read_text(encoding="utf-8")
+    assert "COPY backend/data/comparables.duckdb" not in dockerfile, (
+        "copying the file directly makes a build without market data fail"
+    )
+
+
+def test_the_service_and_the_image_agree_on_which_database_to_read():
+    """The app defaults to one filename; the ingest writes two. A mismatch means
+    a container that ships market data and then reports it missing."""
+    from bayyina.api.app import create_app  # noqa: F401
+
+    app_source = (ROOT / "backend" / "src" / "bayyina" / "api" / "app.py").read_text("utf-8")
+    served = re.search(r'Path\(settings\.data_dir\)\s*/\s*"([^"]+\.duckdb)"', app_source)
+    assert served, "the app no longer names a default comparables database"
+
+    script = (ROOT / "backend" / "scripts" / "ingest_market.py").read_text("utf-8")
+    written = re.search(
+        r'"--serving-database".*?default=Path\("data/([^"]+\.duckdb)"\)', script, re.S
+    )
+    assert written, "the ingest script no longer writes a serving database"
+
+    assert served.group(1) == written.group(1), (
+        f"the service reads {served.group(1)} but the ingest writes {written.group(1)}"
+    )
+
+    ignored = DOCKERIGNORE.read_text(encoding="utf-8")
+    assert f"!backend/data/{served.group(1)}" in ignored, (
+        f"the image excludes {served.group(1)}, which is the file the service reads"
+    )
+
+
+# --- Files that are not Python --------------------------------------------
+
+
+def test_every_non_python_file_the_package_needs_is_declared_as_package_data():
+    """`pip install .` copies `.py` and nothing else unless told otherwise.
+
+    The evidence templates are `.j2`. Without a declaration the container builds,
+    boots, verifies its corpus, serves `/healthz` — and then fails on the first
+    evidence pack with "template not found", which is the worst possible moment
+    and the least obvious cause.
+
+    Written as a sweep rather than a single assertion so that the next
+    non-Python file added to the package is caught by the same test.
+    """
+    import fnmatch
+    import tomllib
+
+    with (ROOT / "backend" / "pyproject.toml").open("rb") as handle:
+        declared = tomllib.load(handle)["tool"]["setuptools"].get("package-data", {})
+
+    source = ROOT / "backend" / "src" / "bayyina"
+    ignored = {".pyc", ".pyo", ".pyi", ".typed"}
+    undeclared: list[str] = []
+
+    for path in sorted(source.rglob("*")):
+        if path.is_dir() or path.suffix in {".py"} | ignored or "__pycache__" in path.parts:
+            continue
+        relative = path.relative_to(source)
+        package = f"bayyina.{relative.parts[0]}" if len(relative.parts) > 1 else "bayyina"
+        within = "/".join(relative.parts[1:]) if len(relative.parts) > 1 else relative.name
+        patterns = declared.get(package, []) + declared.get("bayyina", []) + declared.get("*", [])
+        if not any(fnmatch.fnmatch(within, pattern) for pattern in patterns):
+            undeclared.append(f"{relative.as_posix()} (looked for a pattern under {package!r})")
+
+    assert not undeclared, (
+        "these files ship in the source tree but not in an installed package:\n  "
+        + "\n  ".join(undeclared)
+    )

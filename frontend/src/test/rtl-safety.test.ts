@@ -17,6 +17,7 @@ import { describe, expect, it } from "vitest";
  */
 
 const SRC = join(__dirname, "..");
+const ROOT = join(SRC, "..");
 
 /** Tailwind utilities that hard-code a side, and their logical equivalents. */
 const BANNED_CLASSES: Array<[RegExp, string]> = [
@@ -40,9 +41,13 @@ const BANNED_CSS: Array<[RegExp, string]> = [
   [/margin-right\s*:/, "margin-inline-end"],
   [/padding-left\s*:/, "padding-inline-start"],
   [/padding-right\s*:/, "padding-inline-end"],
-  [/border-left\s*:/, "border-inline-start"],
-  [/border-right\s*:/, "border-inline-end"],
+  // Longhands too. The first version matched only `border-left:`, so
+  // `border-left-color:` slipped through — and that is the form an inline style
+  // on a coloured card actually takes.
+  [/border-left(-(color|width|style))?\s*:/, "border-inline-start-*"],
+  [/border-right(-(color|width|style))?\s*:/, "border-inline-end-*"],
   [/text-align\s*:\s*(left|right)/, "text-align: start | end"],
+  [/float\s*:\s*(left|right)/, "float: inline-start | inline-end"],
 ];
 
 function walk(dir: string, extensions: string[]): string[] {
@@ -75,15 +80,48 @@ function violations(files: string[], rules: Array<[RegExp, string]>): string[] {
 
 describe("RTL safety", () => {
   it("uses no physical direction utilities in components", () => {
-    const files = walk(SRC, [".tsx", ".ts"]).filter((f) => !f.includes("rtl-safety"));
-    const found = violations(files, BANNED_CLASSES);
-    expect(found, `Physical direction utilities break Arabic:\n  ${found.join("\n  ")}`).toEqual(
-      [],
+    const files = walk(SRC, [".tsx", ".ts"]).filter(
+      (f) => !f.includes("rtl-safety"),
     );
+    const found = violations(files, BANNED_CLASSES);
+    expect(
+      found,
+      `Physical direction utilities break Arabic:\n  ${found.join("\n  ")}`,
+    ).toEqual([]);
   });
 
   it("uses no physical direction properties in stylesheets", () => {
     const found = violations(walk(SRC, [".css"]), BANNED_CSS);
-    expect(found, `Physical CSS properties break Arabic:\n  ${found.join("\n  ")}`).toEqual([]);
+    expect(
+      found,
+      `Physical CSS properties break Arabic:\n  ${found.join("\n  ")}`,
+    ).toEqual([]);
+  });
+
+  it("holds the HTML entry points to the same rule", () => {
+    /**
+     * `index.html` and `specimen.html` sit at the project root, not under
+     * `src/`, so neither scan above reached them — a gap the specimen page
+     * introduced by existing. It carries inline `style=` with direction
+     * properties, and an inline `margin-left` mirrors exactly as badly as a
+     * class does.
+     */
+    const pages = readdirSync(ROOT)
+      .filter((entry) => entry.endsWith(".html"))
+      .map((entry) => join(ROOT, entry));
+
+    expect(
+      pages.length,
+      "no HTML entry points were found to scan",
+    ).toBeGreaterThan(0);
+
+    const found = [
+      ...violations(pages, BANNED_CLASSES),
+      ...violations(pages, BANNED_CSS),
+    ];
+    expect(
+      found,
+      `Physical direction in an HTML entry breaks Arabic:\n  ${found.join("\n  ")}`,
+    ).toEqual([]);
   });
 });

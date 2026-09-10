@@ -29,10 +29,27 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+# Templates are not Python and `pip install .` would silently leave them behind,
+# so the container would boot cleanly and then fail on the first evidence pack
+# with "template not found". Declared explicitly rather than via
+# include-package-data, which depends on what the VCS happens to be tracking.
+[tool.setuptools.package-data]
+# The markers are declared too, so the templates tree stays self-describing
+# wherever it is installed. Kept as a strict sweep with no extension
+# exemptions: a heuristic that skips ".md" would eventually skip something
+# the package does need.
+"bayyina.evidence" = ["templates/**/*.j2", "templates/**/*.md"]
+
 [tool.pytest.ini_options]
 pythonpath = ["src", "."]
 testpaths = ["tests"]
-addopts = "-q"
+addopts = "-q --strict-markers"
+markers = [
+    # Needs the DLD release, which is 200 MB and gitignored. Absent in CI, so
+    # these skip there — a stated limit, not a silent one. See
+    # tests/market/test_release.py.
+    "dataset: requires the real DLD contract release on disk",
+]
 
 [tool.ruff]
 line-length = 100

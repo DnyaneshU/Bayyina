@@ -18,7 +18,8 @@ import { ApiError, api, type EvaluationRecord } from "../api/client";
 
 const RENT_RULE = "rent_increase.dubai.decree_43_2013";
 
-type FieldName = "current_annual_rent" | "market_average_rent" | "proposed_annual_rent";
+type FieldName =
+  "current_annual_rent" | "market_average_rent" | "proposed_annual_rent";
 
 const FIELDS: Array<{ name: FieldName; labelKey: string; helpKey: string }> = [
   {
@@ -81,7 +82,8 @@ export default function Checker() {
     for (const { name } of FIELDS) {
       const raw = values[name].trim();
       if (!raw) found[name] = t("validation.required");
-      else if (!/^\d+(\.\d{1,2})?$/.test(raw)) found[name] = t("validation.notANumber");
+      else if (!/^\d+(\.\d{1,2})?$/.test(raw))
+        found[name] = t("validation.notANumber");
       else if (Number(raw) <= 0) found[name] = t("validation.mustBePositive");
     }
     setErrors(found);
@@ -115,7 +117,9 @@ export default function Checker() {
       setRecord(result);
     } catch (error) {
       setFailure(
-        error instanceof ApiError ? error.message : t("status.serviceUnavailable"),
+        error instanceof ApiError
+          ? error.message
+          : t("status.serviceUnavailable"),
       );
     } finally {
       setBusy(false);
@@ -145,7 +149,7 @@ export default function Checker() {
     <form onSubmit={onSubmit} noValidate className="space-y-6">
       <div>
         <h2 className="text-xl font-semibold">{t("checker.heading")}</h2>
-        <p className="mt-1 text-sm text-[--color-ink-500]">{t("checker.intro")}</p>
+        <p className="mt-1 text-sm text-ink-500">{t("checker.intro")}</p>
       </div>
 
       {FIELDS.map(({ name, labelKey, helpKey }) => (
@@ -153,11 +157,11 @@ export default function Checker() {
           <label htmlFor={name} className="block font-medium">
             {t(labelKey)}
           </label>
-          <p id={`${name}-help`} className="mt-1 mb-2 text-sm text-[--color-ink-500]">
+          <p id={`${name}-help`} className="mt-1 mb-2 text-sm text-ink-500">
             {t(helpKey)}
           </p>
           <div className="flex items-center gap-2">
-            <span aria-hidden="true" className="text-sm text-[--color-ink-500]">
+            <span aria-hidden="true" className="text-sm text-ink-500">
               {t("checker.currency")}
             </span>
             <input
@@ -170,13 +174,23 @@ export default function Checker() {
               aria-describedby={errors[name] ? `${name}-error` : `${name}-help`}
               aria-invalid={errors[name] ? true : undefined}
               onChange={(event) =>
-                setValues((current) => ({ ...current, [name]: event.target.value }))
+                setValues((current) => ({
+                  ...current,
+                  [name]: event.target.value,
+                }))
               }
-              className="w-full rounded border border-[--color-rule] bg-[--color-paper-raised] px-3 py-2 text-lg"
+              // `border-edge`, not `border-rule`. A field a person has to type
+              // into is a boundary they must be able to find: WCAG 1.4.11 asks
+              // for 3:1 and `rule` manages 1.26:1. This is the rent input.
+              className="tabular w-full rounded border border-edge bg-paper-raised px-3 py-2 text-lg"
             />
           </div>
           {errors[name] && (
-            <p id={`${name}-error`} role="alert" className="mt-1 text-sm text-[--color-danger]">
+            <p
+              id={`${name}-error`}
+              role="alert"
+              className="mt-1 text-sm text-danger"
+            >
               {errors[name]}
             </p>
           )}
@@ -184,7 +198,7 @@ export default function Checker() {
       ))}
 
       {failure && (
-        <p role="alert" className="text-[--color-danger]">
+        <p role="alert" className="text-danger">
           {failure}
         </p>
       )}
@@ -192,7 +206,7 @@ export default function Checker() {
       <button
         type="submit"
         disabled={busy}
-        className="w-full rounded bg-[--color-ink-900] px-4 py-3 font-medium text-white disabled:opacity-60"
+        className="w-full rounded bg-ink-900 px-4 py-3 font-medium text-white disabled:opacity-60"
       >
         {busy ? t("checker.submitting") : t("checker.submit")}
       </button>
@@ -239,15 +253,17 @@ function Result({
       </div>
 
       {review ? (
-        <div className="rounded border border-[--color-rule] bg-[--color-paper-raised] p-4">
-          <p>{t("review.body", { count: record.evidence?.contract_count ?? 0 })}</p>
-          <p className="mt-2 text-sm text-[--color-ink-500]">{t("review.stillTrue")}</p>
+        <div className="rounded border border-rule bg-paper-raised p-4">
+          <p>
+            {t("review.body", { count: record.evidence?.contract_count ?? 0 })}
+          </p>
+          <p className="mt-2 text-sm text-ink-500">{t("review.stillTrue")}</p>
         </div>
       ) : (
         <>
           {record.conditions.length > 0 && (
             <div
-              className="rounded border-s-4 bg-[--color-paper-raised] p-4"
+              className="rounded border-s-4 bg-paper-raised p-4"
               style={{ borderInlineStartColor: "var(--color-conditional)" }}
             >
               <h3 className="font-medium">{t("condition.heading")}</h3>
@@ -263,7 +279,7 @@ function Result({
             </div>
           )}
 
-          <dl className="rounded border border-[--color-rule] bg-[--color-paper-raised] p-4">
+          <dl className="rounded border border-rule bg-paper-raised p-4">
             <h3 className="mb-3 text-sm font-semibold tracking-wide uppercase">
               {t("result.howWeGotThere")}
             </h3>
@@ -288,10 +304,12 @@ function Result({
         </>
       )}
 
-      <div className="rounded border border-[--color-rule] bg-[--color-paper-raised] p-4">
-        <h3 className="text-sm font-semibold tracking-wide uppercase">{t("result.rule")}</h3>
+      <div className="rounded border border-rule bg-paper-raised p-4">
+        <h3 className="text-sm font-semibold tracking-wide uppercase">
+          {t("result.rule")}
+        </h3>
         <p className="mt-2 font-medium">{record.citation.title}</p>
-        <p className="text-sm text-[--color-ink-500]">{record.citation.clause}</p>
+        <p className="text-sm text-ink-500">{record.citation.clause}</p>
 
         <button
           type="button"
@@ -302,26 +320,28 @@ function Result({
           {showSource ? t("result.hideSource") : t("result.showSource")}
         </button>
         {showSource && (
-          <blockquote className="mt-2 border-s-2 border-[--color-rule] ps-3 text-sm whitespace-pre-line">
+          <blockquote className="mt-2 border-s-2 border-rule ps-3 text-sm whitespace-pre-line">
             {record.citation.verbatim}
           </blockquote>
         )}
 
-        <p className="mt-3 text-xs text-[--color-ink-500]">
+        <p className="mt-3 text-xs text-ink-500">
           {t("result.ruleVersion")} {record.rule_version} ·{" "}
-          <code className="break-all">{record.rule_signature.slice(0, 23)}…</code>
+          <code className="break-all">
+            {record.rule_signature.slice(0, 23)}…
+          </code>
         </p>
       </div>
 
-      <p className="rounded bg-[--color-paper-raised] p-3 text-sm text-[--color-ink-700]">
+      <p className="rounded bg-paper-raised p-3 text-sm text-ink-700">
         {t("disclosure.provisional")}
       </p>
-      <p className="text-sm text-[--color-ink-500]">{t("disclosure.callerStated")}</p>
+      <p className="text-sm text-ink-500">{t("disclosure.callerStated")}</p>
 
       <button
         type="button"
         onClick={onReset}
-        className="w-full rounded border border-[--color-ink-700] px-4 py-3 font-medium"
+        className="w-full rounded border border-ink-700 px-4 py-3 font-medium"
       >
         {t("checker.startOver")}
       </button>
@@ -339,8 +359,8 @@ function Row({
   emphasis?: boolean;
 }) {
   return (
-    <div className="flex justify-between gap-4 border-t border-[--color-rule] py-2 first:border-t-0">
-      <dt className="text-[--color-ink-500]">{label}</dt>
+    <div className="flex justify-between gap-4 border-t border-rule py-2 first:border-t-0">
+      <dt className="text-ink-500">{label}</dt>
       <dd className={emphasis ? "font-semibold" : undefined}>{value}</dd>
     </div>
   );

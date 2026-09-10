@@ -6,10 +6,16 @@ verdict of HUMAN_REVIEW_REQUIRED is **200** — it is an outcome, not an error, 
 returning it as a failure would teach every client to treat honesty as a fault.
 """
 
+import re
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 
 from bayyina.api.app import create_app
+from bayyina.settings import Settings
+
+ROOT = Path(__file__).resolve().parents[3]
 
 RENT = "rent_increase.dubai.decree_43_2013"
 NOTICE = "notice_validity.dubai.law_26_2007_a14"
@@ -38,8 +44,26 @@ NOTICE_BODY = {
 
 @pytest.fixture(scope="module")
 def client(tmp_path_factory):
+    """A client for testing evaluation, not throttling.
+
+    The module shares one client, so with the production limit of 30 requests a
+    minute this file was permanently one test away from 429s that have nothing to
+    do with what it asserts — a trap for whoever adds the next test. Throttling
+    has its own file, where the real limit is the subject.
+    """
     audit = tmp_path_factory.mktemp("audit") / "audit.jsonl"
-    return TestClient(create_app(audit_path=audit))
+    settings = Settings(public_rate_limit_per_minute=10_000)
+    # `market_db` is named explicitly at a path that does not exist. Left to the
+    # default, these tests would read `data/market.duckdb` if a developer happened
+    # to have built one and not read it in CI - so the same suite would assert
+    # different things on two machines. The market routes have their own tests.
+    return TestClient(
+        create_app(
+            audit_path=audit,
+            market_db=tmp_path_factory.mktemp("market") / "absent.duckdb",
+            settings=settings,
+        )
+    )
 
 
 def _thin(count: int) -> dict:
@@ -193,7 +217,8 @@ def test_healthz_reports_corpus_state(client):
     body = client.get("/healthz").json()
     assert body["corpus_signed"] is True
     assert body["rule_count"] == 2
-    assert body["status"] == "ok"
+    assert body["checks"]["corpus_loaded"] is True
+    assert body["checks"]["corpus_signed"] is True
 
 
 def test_healthz_names_every_rule_and_its_signature(client):
@@ -204,16 +229,28 @@ def test_healthz_names_every_rule_and_its_signature(client):
     assert all(rule["approval_status"] == "provisional" for rule in rules)
 
 
-def test_healthz_declares_what_it_has_not_checked(client):
+def test_healthz_reports_missing_market_data_rather_than_hiding_it(client):
     """A green health check that lies is worse than none.
 
-    Market data is not wired until T2.1, so healthz must not imply it verified
-    anything about it.
+    This client has no comparables database, which is a supported state - the
+    notice rule and a caller-supplied figure both still work. What is not
+    supported is looking healthy while a dataset the product advertises is
+    absent, so `status` degrades and the failing check is named.
     """
     body = client.get("/healthz").json()
-    assert "market_snapshot" in body["not_yet_checked"]
-    assert set(body["checks"]) == {"corpus_loaded", "corpus_signed", "audit_writable"}
-    assert all(body["checks"].values())
+    assert body["checks"]["market_data_loaded"] is False
+    assert body["checks"]["market_data_usable"] is False
+    assert body["status"] == "degraded"
+    assert body["market_data_age_days"] is None, "no data has no age"
+
+
+def test_healthz_no_longer_defers_the_market_snapshot(client):
+    """It was in `not_yet_checked` from T1.7 until T2.3. It is checked now, so
+    it must not still be advertised as unchecked - a deferral list that outlives
+    its deferrals stops being worth reading (D-067)."""
+    body = client.get("/healthz").json()
+    assert "market_snapshot" not in body["not_yet_checked"]
+    assert set(body["checks"]) >= {"corpus_loaded", "corpus_signed", "audit_writable"}
 
 
 # --- Latency -----------------------------------------------------------------
@@ -273,3 +310,46 @@ def test_a_rule_that_cannot_answer_is_a_500_not_a_422(tmp_path):
     assert response.status_code == 500
     # The caller is told nothing actionable, because there is nothing they can do.
     assert "0.5000" not in response.text
+
+
+def test_the_web_checker_payload_is_accepted_exactly_as_it_is_sent(client):
+    """The seam. Each side has been correct on its own before and still broken.
+
+    `Checker.tsx` deliberately sends `market` with **only** a snapshot_id: we did
+    not derive the figure, and inventing a contract_count would be inventing
+    evidence. If `MarketEvidenceIn` ever made that field required, the backend
+    suite would still pass (it builds its own payloads) and the frontend suite
+    would still pass (it mocks fetch) while the one button that matters returned
+    422. That is exactly how `/evaluate` went missing from the dev proxy.
+    """
+    checker = (ROOT / "frontend" / "src" / "components" / "Checker.tsx").read_text(encoding="utf-8")
+
+    market = re.search(r"market:\s*\{([^}]*)\}", checker)
+    assert market, "Checker.tsx no longer sends a `market` object — has the payload changed?"
+    assert "contract_count" not in market.group(1), (
+        "the checker is claiming a contract count for a figure it did not derive"
+    )
+
+    response = client.post(
+        "/evaluate",
+        json={
+            "rule_id": "rent_increase.dubai.decree_43_2013",
+            "inputs": {
+                "current_annual_rent": "80000",
+                "proposed_annual_rent": "96000",
+                "market_average_rent": "87000",
+            },
+            "input_sources": {
+                "current_annual_rent": "caller_stated",
+                "proposed_annual_rent": "caller_stated",
+                "market_average_rent": "user_supplied",
+            },
+            "market": {"snapshot_id": "user_supplied"},
+        },
+    )
+
+    assert response.status_code == 200, response.json()
+    record = response.json()
+    assert record["state"] == "CLEAR_WITH_CONDITIONS"
+    assert record["conditions"] == ["market_average_not_derived"]
+    assert record["confidence"] is None, "a figure we did not derive carries no confidence"

@@ -140,3 +140,52 @@ def test_a_missing_frontend_is_normal_not_a_failure(tmp_path):
         create_app(audit_path=tmp_path / "audit.jsonl", static_dir=tmp_path / "no-dist"),
     )
     assert client.get("/healthz").status_code == 200
+
+
+def test_the_app_is_built_once_however_often_it_is_looked_up(monkeypatch):
+    """uvicorn accesses `bayyina.api.app:app` more than once.
+
+    Unmemoised, `__getattr__` built a complete application on every access: the
+    corpus verified twice, the comparables database read twice, and **two
+    `AuditLog` objects with a lock each** over the same file. Only one was ever
+    served, so the chain was never at risk — but a second audit log holding a
+    second lock is the exact shape of the bug D-035 exists to prevent.
+
+    Caught by counting boot lines in a running container, not by any test.
+    """
+    import bayyina.api.app as module
+
+    builds = 0
+    real = module.create_app
+
+    def counted(**kwargs):
+        nonlocal builds
+        builds += 1
+        return real(**kwargs)
+
+    monkeypatch.setattr(module, "create_app", counted)
+    monkeypatch.delitem(module.__dict__, "app", raising=False)
+
+    first = module.app
+    second = module.app
+    third = module.app
+
+    assert builds == 1, f"the app was built {builds} times"
+    assert first is second is third
+    monkeypatch.delitem(module.__dict__, "app", raising=False)
+
+
+def test_an_unbuilt_module_still_has_no_import_side_effect():
+    """The other half of the contract: importing must not build anything, so a
+    broken corpus fails the process that asked for an app rather than every test
+    collection that imported `create_app`."""
+    import subprocess
+    import sys
+
+    result = subprocess.run(
+        [sys.executable, "-c", "import bayyina.api.app as m; print('app' in m.__dict__)"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert result.stdout.strip() == "False", "importing the module built an application"

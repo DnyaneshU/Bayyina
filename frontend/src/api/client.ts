@@ -24,6 +24,7 @@ export interface HealthResponse {
    * anything unverified is listed here.
    */
   not_yet_checked: string[];
+  market_data_age_days: number | null;
   corpus_signed: boolean;
   rule_count: number;
   rules: RuleSummary[];

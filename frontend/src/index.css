@@ -1,36 +1,110 @@
 @import "tailwindcss";
 
+/* Tests are not markup. Tailwind v4 scans every file in the project for class
+   names, so `styling-safety.test.ts` — whose whole job is to document the
+   banned Tailwind v3 arbitrary-variable syntax — was making Tailwind emit that
+   exact utility into the production stylesheet, with an invalid value. A test
+   fixture must not be able to add a rule to what ships.
+
+   The example is described rather than written out here for the same reason:
+   this file is not excluded from the scan, and spelling the class would be the
+   very mistake the exclusion exists to prevent. */
+@source not "./**/*.test.ts";
+@source not "./**/*.test.tsx";
+
+/* Bundled, never fetched. Three scripts at two weights, 175 KB total.
+   No Google Fonts request: a page that phones a third party on load is a
+   privacy leak in a product about tenancy disputes, it breaks under the strict
+   CSP, and it would render differently in the PDF pipeline, which needs the
+   same faces on disk (T2.5). Only the subsets we use — Latin, Arabic,
+   Malayalam — and only 400 and 600, because a type system with seven weights
+   is a type system nobody keeps consistent. */
+@import "@fontsource/noto-sans/latin-400.css";
+@import "@fontsource/noto-sans/latin-600.css";
+@import "@fontsource/noto-sans-arabic/arabic-400.css";
+@import "@fontsource/noto-sans-arabic/arabic-600.css";
+@import "@fontsource/noto-sans-malayalam/malayalam-400.css";
+@import "@fontsource/noto-sans-malayalam/malayalam-600.css";
+
 /* ---------------------------------------------------------------------------
-   Design tokens.
+   THE DESIGN SYSTEM.  T2.0.
 
-   This product asks people to trust a legal determination, so the interface has
-   to look considered rather than templated. One palette, reused by the checker,
-   the provenance pages, the officer dashboard and the PDF templates.
+   This product asks people to trust a legal determination about their home. An
+   interface that looks templated undermines the claim before a word is read —
+   and one that is hard to read undermines it for exactly the people it is for.
 
-   Outcome colours are deliberate: HUMAN_REVIEW_REQUIRED is a legitimate result,
-   not an error, so it reads as *considered* (slate/amber) and never as failure
-   (red). Rendering honesty as a malfunction teaches users to distrust it.
+   The audience is stated in the plan: **a competent adult reader in their
+   second or third language, on a small phone.** Every decision below follows
+   from that rather than from taste.
+
+   One palette, reused by the checker, the provenance pages, the officer
+   dashboard and the PDF templates, so the artifact a resident carries into a
+   hearing looks like the service that produced it.
 --------------------------------------------------------------------------- */
 @theme {
-  --color-ink-900: #10231c;
-  --color-ink-700: #1f3d33;
-  --color-ink-500: #4a6b60;
-  --color-ink-300: #8fa79e;
+  /* --- Type ---------------------------------------------------------------
+     Noto because it is the only family that covers all three scripts with one
+     design, so Arabic and Malayalam are not visibly bolted on.
 
-  --color-paper: #fbfaf7;
-  --color-paper-raised: #ffffff;
-  --color-rule: #e3e0d8;
-
-  /* Outcome states */
-  --color-clear: #14624a; /* determinate answer */
-  --color-conditional: #8a6a1f; /* answer with a named condition */
-  --color-review: #3d5a80; /* needs a person — considered, not failed */
-  --color-danger: #8c2f22; /* reserved for genuine errors only */
-
+     Sizes run one step larger than a typical web scale and leading is
+     deliberately loose. Reading in a second language is slower and more
+     line-by-line; tight leading makes the eye lose its place, and this is a
+     page people read carefully because money depends on it. */
   --font-sans:
-    "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  --font-arabic: "Noto Sans Arabic", var(--font-sans);
-  --font-malayalam: "Noto Sans Malayalam", var(--font-sans);
+    "Noto Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-arabic: "Noto Sans Arabic", "Noto Sans", ui-sans-serif, sans-serif;
+  --font-malayalam:
+    "Noto Sans Malayalam", "Noto Sans", ui-sans-serif, sans-serif;
+
+  --text-xs: 0.8125rem;
+  --text-xs--line-height: 1.5;
+  --text-sm: 0.9375rem;
+  --text-sm--line-height: 1.55;
+  --text-base: 1.0625rem; /* 17px, not 16 — the body size on a phone */
+  --text-base--line-height: 1.6;
+  --text-lg: 1.25rem;
+  --text-lg--line-height: 1.5;
+  --text-xl: 1.5rem;
+  --text-xl--line-height: 1.35;
+  --text-2xl: 1.875rem;
+  --text-2xl--line-height: 1.25;
+  --text-3xl: 2.25rem;
+  --text-3xl--line-height: 1.15;
+
+  /* --- Ink and ground -----------------------------------------------------
+     Every foreground here clears **WCAG AA (4.5:1)** against both grounds, and
+     that is asserted in src/test/contrast.test.ts rather than believed. Two
+     tokens were removed in the writing of this file because they did not:
+     `ink-300` at 2.46:1, which nothing used, and the old `rule` at 1.26:1,
+     which was on the rent input's border. */
+  --color-ink-900: #10231c; /* 15.7:1 — headings, the answer */
+  --color-ink-700: #1f3d33; /* 11.3:1 — body */
+  --color-ink-500: #4a6b60; /*  5.7:1 — secondary, still AA */
+
+  --color-paper: #fbfaf7; /* warm, not white: less glare in sunlight */
+  --color-paper-raised: #ffffff;
+
+  /* Two boundary weights, and the difference is not decoration.
+     `rule` separates rows of text and carries no meaning if unseen.
+     `edge` is any boundary a person must be able to *find* — the outline of a
+     field they have to type into. WCAG 1.4.11 requires 3:1 for that, and the
+     colour it replaced managed 1.26:1. */
+  --color-rule: #d8d3c6; /* 1.6:1 — decorative hairline only */
+  --color-edge: #8a8370; /* 3.6:1 — inputs, buttons, anything interactive */
+
+  /* --- Outcome states -----------------------------------------------------
+     The whole product turns on this. `HUMAN_REVIEW_REQUIRED` is the system
+     working — it is what honesty looks like when the facts do not support an
+     answer — so it must read as **considered**, never as failure. It gets a
+     calm slate, the colour of a form, not the red of an error.
+
+     `danger` is reserved for things that are genuinely broken: the service is
+     unreachable, the corpus is unsigned. If it ever appears next to an outcome,
+     that is a bug. */
+  --color-clear: #14624a; /* 7.0:1 — a determinate answer */
+  --color-conditional: #8a6a1f; /* 4.8:1 — settled, with a named condition */
+  --color-review: #3d5a80; /* 6.8:1 — needs a person. Considered, not failed */
+  --color-danger: #8c2f22; /* 7.9:1 — genuine errors only */
 }
 
 :root {
@@ -39,10 +113,15 @@
 
 html {
   background: var(--color-paper);
-  color: var(--color-ink-900);
+  color: var(--color-ink-700);
+  /* Never scroll sideways on a 360px phone. */
+  overflow-x: hidden;
+  -webkit-text-size-adjust: 100%;
 }
 
-/* Per-language typography. Set on <html lang> by the i18n layer. */
+/* Per-script typography, set on <html lang> by the i18n layer. Each script gets
+   the face designed for it; the Latin fallback exists so a mixed line — an AED
+   figure inside an Arabic sentence — does not fall back to something arbitrary. */
 html[lang="ar"] {
   font-family: var(--font-arabic);
 }
@@ -51,14 +130,35 @@ html[lang="ml"] {
 }
 
 /* RTL is a layout concern, not a font swap. Components use logical properties
-   (margin-inline-start, padding-inline, text-start) so that setting dir="rtl"
-   mirrors the whole layout rather than only the text direction. */
+   (margin-inline-start, padding-inline, text-start, border-inline-start) so that
+   setting dir="rtl" mirrors the whole layout rather than only the text
+   direction. Enforced by src/test/rtl-safety.test.ts, because RTL regressions
+   are silent — nothing throws, the page is simply wrong. */
 html[dir="rtl"] {
   direction: rtl;
 }
 
-/* Accessibility floor: 44px tap targets and visible focus. The audience
-   includes older and lower-literacy users on small phones. */
+/* Money and dates line up. A column of rents where the digits do not align is
+   harder to compare, and comparing them is the entire task. */
+.tabular,
+input[inputmode="numeric"],
+input[type="date"] {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+/* Headings should not leave one orphaned word on a phone. */
+h1,
+h2,
+h3 {
+  text-wrap: balance;
+}
+p {
+  text-wrap: pretty;
+}
+
+/* Accessibility floor. 44px is the smallest reliable tap target, and the
+   audience includes older users on small phones. */
 button,
 a[role="button"],
 input,
@@ -66,7 +166,21 @@ select {
   min-block-size: 44px;
 }
 
+/* A focus ring that is findable on both grounds — 6.8:1 — and is never removed.
+   Keyboard users include screen-reader users, and this is how they know where
+   they are. */
 :focus-visible {
   outline: 2px solid var(--color-review);
   outline-offset: 2px;
+}
+
+/* Respect a reader who has asked for less motion. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

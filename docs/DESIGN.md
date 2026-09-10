@@ -118,7 +118,7 @@ Gates, not preferences. Bayyina scored honestly.
 
 | # | Criterion | Bayyina |
 |---|---|---|
-| 1 | Real, quantifiable government pain | ✅ PS-3; 746,853 residential contracts/yr, our own query |
+| 1 | Real, quantifiable government pain | ✅ PS-3; 743,740 residential contracts/yr, of which 567,652 are single-unit homes — our own query |
 | 2 | **The agent must *do* something** | ✅ Diagnoses, computes, generates the evidence pack, dispatches it to the caller's phone, arms the deadline |
 | 3 | Strong reason for voice | ✅ PS-1 — the caller cannot fill a form because they do not know which field decides |
 | 4 | Clear end-to-end call flow | ✅ [ARCHITECTURE.md](ARCHITECTURE.md) §7 |
@@ -354,7 +354,7 @@ Checked 2026-09-07. Re-verify before submission.
 
 | Fact | Finding | Source |
 |---|---|---|
-| Rent contract data | **9,798,685 contract-level Ejari records** obtained and SHA256-verified 2026-09-09. 746,853 residential in a rolling 12 months | DLD open data ([mirror](https://github.com/dataengineergaurav/rental-market-dynamics-dubai/releases)) |
+| Rent contract data | **9,798,685 contract-level Ejari records** obtained and SHA256-verified 2026-09-09. 743,740 residential in a rolling 12 months, of which **567,652** are single-unit homes after T2.1 scope rules; **5,302,438** contracts across **184 areas** ingested | DLD open data ([mirror](https://github.com/dataengineergaurav/rental-market-dynamics-dubai/releases)) |
 | Band methodology current | Smart Rental Index (2025-01-01) changed *valuation*, not the caps. Decree 43/2013 still governs | [DLD](https://dubailand.gov.ae/en/news-media/smart-rental-index-announcement) |
 | Malayalam TTS / STT | Supported — Eleven v3, Scribe | [TTS](https://elevenlabs.io/text-to-speech/malayalam) · [STT](https://elevenlabs.io/speech-to-text/malayalam) |
 | Non-UAE team eligibility | 90%+ of DIFC ecosystem founders are non-UAE nationals | [Ignyte](https://www.ignyte.ae/) |

@@ -20,14 +20,23 @@ and sends a complete evidence pack to their phone **before the call ends**.
 
 ## Status
 
-🚧 **Phase 0 complete. Phase 1 (walking skeleton) in progress — T1.1–T1.8 done.**
+🚧 **Phase 0 complete. Phase 1 (walking skeleton) done through T1.8. Phase 2
+in progress — T2.1, T2.2 and T2.3 complete.**
 
 The engine is real and reachable: two signed rules, a deterministic evaluator, a
-hash-chained audit log, and a live `POST /evaluate` · `GET /healthz`, under 252
-backend and 50 frontend tests, with a working web checker the whole product
+hash-chained audit log, and a live `POST /evaluate` · `GET /healthz`, under **331
+backend and 70 frontend tests**, with a working web checker the whole product
 serves from a single process. A verdict takes ~3 ms against a 150 ms budget, and
-the public routes are rate limited. Next is deployment (T1.9). This README is expanded
-with real measurements at T2.11.
+the public routes are rate limited.
+
+**Real market data is in, and the product answers from it.** 9,798,685
+registered tenancy contracts ingested to 5,302,396 comparable records across 184
+areas, aggregated into 1,324 cells of which 841 hold enough contracts to quote.
+A resident no longer types their own market average: `POST /evaluate` accepts
+the area, kind and bedroom count and derives the figure, so the answer stops
+being conditional. **A lookup costs 7 microseconds at p95** against a 20 ms
+budget, because the table is read once at boot and never touched again. Next is
+deployment (T1.9). This README is expanded with real measurements at T2.11.
 
 ---
 
@@ -49,6 +58,31 @@ the whole product still ships as **a single container**.
 | Case store | **SQLite** (WAL) | Cases, deadlines, consent, audit. Zero setup, and correct at this scale |
 | Documents | **Jinja2 → WeasyPrint** | Templates, not generation. **The constraint is the mechanism** (G10) |
 | Tests / lint | **pytest · ruff** | — |
+
+### The design system
+
+```bash
+cd frontend && npm run dev      # then open /specimen.html
+```
+
+`specimen.html` is a second Vite entry built from the product's own
+`src/index.css`, so it cannot drift from what ships. Three 360 px panes — the
+width this is designed at — the outcome states, the type scale, and swatches
+whose contrast ratios are computed live rather than typed.
+
+**Every colour pair is asserted against WCAG AA on every test run.** Two were
+failing when the palette was first measured: a token at 2.46:1 that nothing
+used, and — worse — the rent input's border at **1.26:1**, a field a person has
+to find and type into. Boundaries now come in two weights: `rule` for decorative
+hairlines, `edge` at 3.6:1 for anything a person must be able to see.
+
+Noto covers all three scripts with one design, **bundled at 175 KB rather than
+fetched** — the CSP forbids a third-party font request, and the PDF pipeline
+needs the same faces on disk.
+
+The Arabic pane is genuinely `dir="rtl"`. It is *not* a translated page: Arabic
+and Malayalam are pending a native speaker (D-065), so those panes carry
+typographic text that says so.
 
 ### Frontend — `frontend/`
 
@@ -185,7 +219,8 @@ npm run dev                   # proxies /api to :8000
 
 `GET /healthz` reports corpus signature state, every loaded rule with its
 signature, and — in `not_yet_checked` — anything it did **not** verify. Database
-readability and snapshot age land there when the market data is wired at T2.1.
+readability and snapshot age land there at T2.3, when a request can read the
+comparables database and a stale snapshot has to stop being quoted.
 
 **A green health check that lies is worse than none**, so unverified things are
 named rather than omitted.
@@ -264,6 +299,118 @@ as uid 10001, and a fresh volume is owned by root.
 Market comparables derive from
 [`dld_rent_contracts-open`](https://www.dubaipulse.gov.ae/data/dld-registration/dld_rent_contracts-open)
 — registered tenancy contracts published as open data by Dubai Land Department.
+
+### Checking a release before you build from it
+
+```bash
+cd backend
+python scripts/inspect_release.py ~/Downloads/rent_contracts.csv
+```
+
+DLD publishes the same registry through more than one channel and **they do not
+agree**. The Dubai Pulse bulk file uses `annual_amount` and `no_of_prop`; the
+portal on [dubailand.gov.ae](https://dubailand.gov.ae/en/open-data/real-estate-data/)
+returns `Annual Amount`, `No of Units`, `Number of Rooms` — and **no contract
+identifier at all**, which is what de-duplicates multi-property contracts.
+
+This reports what the file has, which columns need mapping, whether a paginated
+export looks truncated, and the horizon — which is the only reason to download a
+new one. Reads CSV or parquet. The ingest reads both too, and refuses a file with
+a missing column by naming it rather than failing inside a query.
+
+### Building the comparables database
+
+```bash
+cd backend
+python scripts/ingest_market.py data/raw/rent_contracts_20260226.parquet
+```
+
+Roughly a minute, and it writes **two** databases:
+
+| File | Size | What it is |
+|---|---:|---|
+| `data/market.duckdb` | 359 MB | The build database — every kept contract. Never shipped, never read at request time. Kept so a figure can be audited back to its rows and re-aggregated over a different window |
+| `data/comparables.duckdb` | **1.3 MB** | What the service reads and the image carries. Comparables, areas and provenance only |
+
+The split is not housekeeping. The request path reads 1,324 numbers; baking the
+build database into a container would ship **5.3 million individual tenancy
+records** in a public image to serve them. Both are gitignored — rebuild rather
+than commit.
+
+The release itself is 200 MB and also gitignored; nothing at request time touches
+it, because a `GROUP BY` over 9.8M rows cannot meet the 150 ms budget.
+
+The ingest separates three things that all remove rows, because conflating them
+hides problems in both directions:
+
+| | Rows | What it means |
+|---|---:|---|
+| **Excluded** | 4,296,572 | Not a single-unit residential tenancy. `property_usage_en = 'Residential'` includes labour camps at a median of AED 504,000, and 1.4M whole-block contracts whose amount covers every property on the contract |
+| **Rejected** | 1,050 | In scope but unusable: impossible rent, dates that run backwards. **0.019%** of in-scope rows, against a 5% budget |
+| **Trimmed** | 198,625 | Usable, but outside 1.5×IQR within their own area, type, bedroom count **and year** |
+| **Stored** | 5,302,438 | Across 184 areas |
+
+Above 5% rejection the ingest **raises** rather than logs, and an unrecognised
+property type holding ≥1% of a release stops it too — a `Flat` → `Apartment`
+rename would otherwise empty the table silently and look entirely normal.
+
+The aggregation runs in the same command and materialises one row per
+`(area, kind, bedrooms)` over a rolling twelve months. **The window ends at the
+data, not at today**: the release runs to 2026-03-01, and a window anchored on
+`now()` would slide off the end of it — six months after publication it would
+cover 267,252 contracts instead of 555,607, shrinking quietly with no error.
+Anchoring on `max(contract_start_date)` is no better: one contract in the file
+starts in **2204**, and a window ending there holds exactly one row. The horizon
+is a high quantile, and dates beyond it are rejected.
+
+Below ten contracts **no median is computed at all** — not computed and withheld,
+never computed. The count is kept, because "we found only four" is the honest
+thing to say and needs the four.
+
+Each cell also records **its own newest contract**, and that — not the release's
+date — is what a lookup reports and what decides a refusal. Of 841 quotable
+cells, 98 trail the release by more than a month and one is **418 days old inside
+a release that is 193 days old**. Freshness then has two thresholds: quoted
+plainly under 120 days, quoted with its date named up to 365, and not quoted at
+all past that. Measured drift is 4.3% at six months against rule bands five
+percentage points wide.
+
+### Asking what a place rents for
+
+```bash
+curl 'http://localhost:8000/areas'          # the 184 we can resolve
+curl 'http://localhost:8000/comparables?area=Al+Barsha+South+Third&kind=flat&bedrooms=2'
+```
+
+**Always 200.** Four answers, and three of them are refusals: `ok`,
+`insufficient_data`, `stale`, `unknown_area`. `/areas` exists because
+`unknown_area` without it is a dead end — the agent has told someone we do not
+know where they live and has nothing to offer next. Each is a thing the agent has to
+say out loud, and returning them as 4xx would teach every client to treat our
+honesty as a fault. Note the spelling — DLD files that neighbourhood as *Al
+Barshaa* South Third, and a resident has no way to know.
+
+`POST /evaluate` takes the same three fields as `dwelling` and derives the figure
+itself, so nobody has to know their own market average:
+
+```json
+{ "rule_id": "rent_increase.dubai.decree_43_2013",
+  "inputs": { "current_annual_rent": "80000", "proposed_annual_rent": "96000" },
+  "input_sources": { "current_annual_rent": "caller_stated",
+                     "proposed_annual_rent": "caller_stated" },
+  "dwelling": { "area": "Al Barsha First", "kind": "flat", "bedrooms": 2 } }
+```
+
+**Market data is optional.** Without it the notice rule and a caller-supplied
+figure both still work; `/healthz` reports `market_data_loaded: false` and
+degrades `status`, and `/comparables` answers 503 with the command that builds
+it. A green health check that lies is worse than none.
+
+Why it matters concretely: raw `Residential` in Jabal Ali Industrial has a median
+of **AED 829,720**, because most of it is labour-camp blocks. After the scope
+rules: **AED 32,000**. Someone asking whether their AED 32,000 rent may rise to
+38,000 would otherwise have been told the market rate was three quarters of a
+million — with a correct citation and signed arithmetic attached.
 
 **Our computed comparable is not the official RERA index figure**, and we never
 claim otherwise. Every evaluation records which source produced the market

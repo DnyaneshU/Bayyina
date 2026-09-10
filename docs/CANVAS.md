@@ -91,15 +91,24 @@
 |---|---|---|
 | Cost to a tenant of getting an answer | **3.5% of annual rent · min AED 500 · max AED 20,000** | RDC filing fee schedule |
 | Time from question to first-instance answer | **30–90 days** (up to 6 months contested) | RDC published practice |
-| Residential tenancy contracts registered per year | **746,853** | **Our own query** of 9,798,685 contract-level Ejari records, DLD open data, 12 months to 2026-02-26 |
+| Residential tenancy contracts registered per year | **743,740** | **Our own query** of 9,798,685 contract-level Ejari records, DLD open data, 12 months to 2026-02-26 |
+| ...of which are single-unit homes a resident rents | **567,652** | The same query after T2.1 scope rules: excludes labour camps, staff accommodation, and whole-block contracts |
 | Phone channels answering this in Malayalam | **0** | DLD/RERA publish in English and Arabic only |
 | Services that track a tenant's 90-day window | **0** | None exists |
 
 > ✅ **The contract figure is now ours, not a secondary source** — computed
-> 2026-09-09 from the DLD contract-level dataset (SHA256-verified), residential
-> only, cleaned of implausible values, rolling twelve months. It independently
-> corroborates the 742,000 published for 2023, which is the best kind of
-> cross-check. Satisfies decision D-012.
+> 2026-09-09 from the DLD contract-level dataset (SHA256-verified), rolling
+> twelve months. 743,740 independently corroborates the 742,000 published for
+> 2023, which is the best kind of cross-check. Satisfies decision D-012.
+>
+> **The second row is the one that matters, and building T2.1 is what produced
+> it.** "Residential" in DLD's schema includes 124,399 labour-camp and
+> staff-accommodation contracts and 146,489 whole-block agreements covering more
+> than one property. Those are real registrations and belong in the headline
+> figure; none of them is a household ringing about a rent increase. **567,652
+> is the population this product actually serves** — and knowing the difference
+> is the difference between quoting a market average and quoting a labour camp's
+> rent. See D-060.
 
 ## E — Who buys this · 60 max · **54 words** ✅
 

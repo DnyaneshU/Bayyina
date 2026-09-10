@@ -686,3 +686,603 @@ not run as root, uvicorn trusts the proxy headers, the build context excludes
 secrets and data, and neither platform config uses a sleeping free tier.
 
 Proven: restoring the offending line turns the test red.
+
+### D-058 · Two silent failures the whole test suite missed
+**2026-09-09** — Running the interface for the first time showed both at once:
+"Request failed (404)" under the form, and a submit button that was invisible.
+
+**`/evaluate` was not in the Vite dev proxy.** Only `/api` and `/healthz` were.
+The page loaded, the health check resolved, and the one button that matters
+404ed against the dev server. Neither suite noticed, because **each side was
+correct on its own** — the backend served the route, the frontend called it, and
+nothing tested the seam. A backend test now reads `vite.config.ts` and asserts
+every route FastAPI serves is proxied.
+
+**Every colour class emitted no CSS.** `bg-[--color-ink-900]` is Tailwind v3
+syntax; under v4 it produces nothing at all — no error, no warning. The submit
+button was white text on a white background, the language buttons were blank
+rectangles, and the whole interface rendered unstyled. v4 generates utilities
+from `@theme` variables instead (`--color-ink-900` → `bg-ink-900`), which is now
+the only form allowed. 37 classes corrected.
+
+The second is the more troubling one: **every test passed while the product was
+visually broken.** jsdom asserts structure, not that a class produced a rule. The
+new test builds the CSS and checks that every themed utility used in the markup
+actually appears in the output — the only check that would have caught it.
+
+Proven: both regressions turn a test red.
+
+### D-059 · An untranslated language discloses itself
+**2026-09-09** — The language switch offered three languages and delivered one.
+Measured: Arabic differed from English in **1 of 57 strings**, Malayalam in
+**zero**. Clicking മലയാളം changed nothing on screen. The mechanism was correct —
+`changeLanguage`, `lang` and `dir` all fired — and the content simply did not
+exist, which from a user's seat is indistinguishable from a dead button.
+
+D-013 forbids machine-translating legal-adjacent copy, and that decision stands:
+a mistranslated disclosure is a compliance failure, not a typo. So the gap is
+real and stays until a speaker fills it. **What was wrong was the silence.**
+
+This product's whole stance is disclosing what it has not verified — provisional
+rules are announced aloud, an unchecked market average becomes a named condition.
+An untranslated interface is the same kind of fact and now behaves the same way:
+selecting a language we cannot render explains that English is what will appear,
+and why it is missing rather than merely approximate.
+
+`_TRANSLATION_STATUS` (D-022) is the single source of truth. `isTranslated()`
+derives from it, and the switcher's mark and the disclosure both derive from
+that — so finishing a translation removes the marker and the disclosure vanishes
+with it. There is no second place to remember.
+
+Rendered as `role="status"`, never `role="alert"`. A disclosed limitation shown
+as a malfunction teaches people to distrust honesty — the same reasoning that
+keeps `HUMAN_REVIEW_REQUIRED` off the danger colour.
+
+Two further defects fixed alongside: the choice was **not persisted**, so every
+reload silently reverted to English, and storage access was unguarded — a private
+window makes `localStorage` throw rather than return null. Auto-detection from
+`navigator.language` was deliberately *not* added: greeting an Arabic browser
+with a mirrored English page it did not ask for is worse than asking. Detection
+belongs with the translations, not before them.
+
+Proven load-bearing: removing the disclosure, hardcoding `isTranslated`, and
+dropping persistence each turn tests red.
+
+### D-060 · Three things the plan's ingest rules got wrong
+**2026-09-09** — T2.1 was written from measurements taken before the pipeline
+existed. Building it against the real file corrected three of them, and one was
+dangerous.
+
+**`no_of_prop` was missing entirely, and it matters most.** `annual_amount` is
+the total for every property on a contract, not the rent of one home. Measured on
+2-bed flats: a one-property contract has a median of AED 66,000; a ten-property
+contract, AED 596,904. **1,375,195 residential rows cover more than one
+property.** Left in, they inflate every median *and* count one contract once per
+property it covers. Nothing in the plan mentioned this.
+
+**`contract_id` is not a key.** The plan said to reject duplicates. There are
+8,178,976 distinct ids across 9,798,685 rows, and the natural key is
+`(contract_id, line_number)` — the lines of a multi-property contract repeat the
+same figures. Rejecting duplicate ids would have thrown away 1.62 million real
+tenancies, blown the 5% budget on its own, and looked like a data-quality
+problem rather than a modelling error.
+
+**The area-name claim was inverted.** The plan said 'Al Barsha South Third' and
+'Al Barshaa South Third' are the same neighbourhood under two codes. They are
+not: the first does not exist in this release. Barsha's sub-areas are spelled
+inconsistently *across* eight genuinely different neighbourhoods, each with its
+own code, and merging them would have corrupted eight medians at once. The one
+real duplicate is 'AL QUSAIS' (148,665 contracts) and 'Al Qusais' (11) —
+verified by asserting against all 213 area names that the key merges exactly
+that pair and nothing else.
+
+The measured contamination was also worse than estimated: 'Room in labor Camp'
+is 978,610 contracts at a median of AED 504,000, not the 455,009 recorded.
+
+### D-061 · Exclusions, rejections and trims are counted separately
+**2026-09-09** — All three remove rows, and conflating them hides problems in
+both directions.
+
+An **exclusion** is out of scope: a labour camp, a whole-block contract, a
+penthouse with no bedroom count. Nothing is wrong with the row. A **rejection**
+is an in-scope row that is unusable — an impossible rent, a contract ending
+before it starts. A **trim** is a usable row sitting far enough from its peers to
+move a median we intend to stand behind.
+
+**The rejection rate is measured against in-scope rows, not the file.** 56% of
+the release is out of scope, so measured against the file a rejection rate could
+triple and still read as a rounding error — the number the DoD turns on would
+stop meaning anything. Measured correctly: **1,050 of 5,502,113, or 0.019%**,
+against a 5% budget.
+
+Above the budget the ingest **raises** rather than logs. A comparable table
+quietly built from a third of the data it should have looks entirely normal from
+outside, and every verdict resting on it inherits the problem invisibly.
+
+### D-062 · The outlier fence is drawn within a year, not across the corpus
+**2026-09-09** — Rents drift. A 2-bed flat in Al Barsha First had a median of
+AED 90,000 in 2017, 65,000 in 2021 and 88,000 in 2026. A fence drawn over the
+whole history describes no year in it and would read an ordinary 2026 contract
+as an outlier of 2021.
+
+Trimming is per `(area, property type, bedrooms, year)`, and cells with fewer
+than 8 contracts are left alone — a quartile over a handful of contracts
+describes noise. Whether a thin cell may be quoted at all is T2.3's decision,
+which is the honest place for it.
+
+### D-063 · Scope is an allowlist, and an allowlist needs a tripwire
+**2026-09-09** — What counts as a dwelling is a list of things people rent and
+live in, not a list of things to exclude. A denylist admits whatever category DLD
+adds next, and the categories it would admit are exactly the harmful ones.
+
+An allowlist fails silently in the other direction: if DLD renames `Flat` to
+`Apartment`, five million rows leave scope, the ingest reports a small clean
+table, and nothing looks wrong until a caller is told there is no data for their
+area. So an unrecognised property type holding ≥1% of the release stops the
+ingest and asks for a decision.
+
+Scope is the **intersection** of property type and sub-type, because neither is
+sufficient alone: 'Room in labor Camp' appears 3,234 times under property type
+'Flat', and 'Studio' appears 6,552 times under 'Labor Camps'.
+
+### D-064 · Five scope tests passed while proving nothing
+**2026-09-09** — Deleting each scope rule in turn should have turned a test red.
+Two did not.
+
+With `no_of_prop = 1` removed, the whole-block contract entered scope — and was
+then removed by the **outlier fence**, because AED 596,904 sits far outside its
+cell. The assertion "this contract is not in the table" held either way. The same
+hid the sub-type rule.
+
+A row that is wrong is usually wrong in several ways at once, so an assertion
+about the *final* table cannot tell you which mechanism caught it. The scope
+tests now assert `in_scope_rows`, which only scope can satisfy. Re-verified:
+deleting any of the seven rules turns a named test red.
+
+The fixture had the same flaw from the other side. Its baseline stepped rents by
+AED 100, making the interquartile range so narrow that every other row read as an
+outlier — a fixture that would have "proved" the fence worked by clipping
+everything put in front of it.
+
+### D-065 · The switcher offers only the languages the interface can render
+**2026-09-10** — Supersedes the disclosure added in D-059, which explained a
+broken control instead of removing it.
+
+Arabic and Malayalam are **not being dropped**. They are the product: no phone
+channel in Dubai answers a tenancy question in Malayalam, which is a headline
+figure on the canvas and much of why this exists. They stay in `LANGUAGES`, in
+the PDF template paths, in the voice scripts, and in the glossary's translation
+plan.
+
+What was wrong is shipping a *control* for them. A button that changes nothing on
+screen is broken however carefully it is captioned, and a caption is not a
+feature. So `AVAILABLE_LANGUAGES` is derived from `_TRANSLATION_STATUS`, the
+switcher renders exactly those, and it disappears entirely at one language —
+a control with one option is not a choice.
+
+Because it is derived, **filling in a locale file and removing its marker is the
+whole of the work**: the button appears on its own, with no component to edit and
+no list to remember. `storedLanguage()` checks availability in the same
+direction, so a translation withdrawn after review cannot pin a returning reader
+to a locale we have stopped standing behind.
+
+**Why we still do not simply translate it.** GLOSSARY §6 rule 3 is the concrete
+blocker, not squeamishness: Decree 43/2013 and Law 26/2007 have **official
+Arabic** published by Dubai's government, and our English is an unofficial
+translation of that Arabic. Drafting Arabic here would be back-translating a
+translation of the authoritative text. The correct Arabic already exists and must
+be sourced.
+
+RTL coverage moved down a layer rather than disappearing with the buttons.
+`src/i18n/language.test.ts` exercises `applyLanguage` directly, so the D-021
+guarantee stays checked while Arabic is pending — RTL regressions are silent, and
+the day the button returns is the worst day to discover the layout stopped
+mirroring.
+
+### D-066 · A comparable and its provenance are written in one transaction
+**2026-09-10** — The ingest wrote contracts, then areas, then rejections, then
+the snapshot row. A crash anywhere in that sequence left **comparable figures
+with no source, no digest and no date**.
+
+A figure that cannot be traced to a file is not evidence, and this failure is
+invisible: every query still returns rows, the medians still look reasonable, and
+nothing reports a problem. The whole store is now one transaction, and the 200 MB
+digest is computed before it opens rather than holding it.
+
+Two invariants are asserted rather than assumed: no `contracts` row exists
+without its `snapshots` row, and a failure mid-store leaves all four tables
+empty. Proven by removing the transaction — the second turns red immediately.
+
+The digest field was also only `min_length=64`, which accepts a truncated or
+reformatted value. It is now `^sha256:[0-9a-f]{64}$`, because that field is the
+whole of a snapshot's traceability.
+
+### D-067 · Deferral markers are checked against the plan, not trusted
+**2026-09-10** — `NOT YET CONSUMED - T2.1` markers outlived T2.1. Two of them —
+on `market_snapshot_max_age_days` and on the `/healthz` deferral — read as
+"arriving in the work we just finished", and both actually belong to T2.3.
+
+A reader cannot tell a genuine deferral from a stale one, which is how a
+deferral list stops being worth reading. Two tests now hold the line: a marker
+must not name a task the plan has ticked, and it must name a task the plan
+actually contains. `ARCHITECTURE.md` naming a database file the code never
+writes was the same class of drift, caught the same way.
+
+### D-068 · The seam between the checker and the API is tested from one side
+**2026-09-10** — `Checker.tsx` sends `market` with only a `snapshot_id`, on
+purpose: we did not derive that figure, and inventing a `contract_count` would be
+inventing evidence. Nothing asserted that the backend accepts that exact shape.
+
+If `MarketEvidenceIn` ever made the field required, **both suites would still
+pass** — the backend builds its own payloads, the frontend mocks `fetch` — while
+the one button that matters returned 422. This is the third instance of the same
+class: `/evaluate` missing from the dev proxy, Tailwind classes emitting no CSS,
+and now this. Each side correct alone; nothing testing the pair.
+
+A backend test now reads the payload literal out of `Checker.tsx` and posts it
+for real. It fails if the API tightens, and it fails if the checker starts
+claiming a contract count. Both proven.
+
+Found while chasing a 422 that turned out to be a stale server process from an
+earlier command — `pkill` does not reach native Windows processes from Git Bash.
+The bug was not real; **the missing test was.**
+
+Fixing it exposed a trap next to it: `tests/api/test_evaluate.py` shares one
+module-scoped client against the production limit of 30 requests a minute, so the
+file was permanently one test away from 429s unrelated to anything it asserts.
+That client is now unthrottled, and throttling is tested where it is the subject.
+
+### D-069 · The comparable window ends at the data, never at today
+**2026-09-10** — A rolling twelve months is the obvious aggregation, and both
+obvious anchors are wrong.
+
+Anchored on `now()`, the window slides off the end of the release. The file runs
+to 2026-03-01; six months after publication a window to today covers 267,252
+contracts instead of 555,607, and it keeps shrinking — no error, no signal, just
+quietly thinner evidence and more cells dropping under the answer floor until
+callers start being told there is no data for their area.
+
+Anchored on `max(contract_start_date)`, it is worse. One contract in the real
+release starts **2204-10-04**, and a twelve-month window ending there contains
+exactly one row. **A single typo would empty the entire comparables table**, and
+the ingest would report success.
+
+So the snapshot carries a `data_horizon`: the 99.9th percentile of its own start
+dates, which 41 obviously-wrong rows cannot move. Every window is anchored to it
+and both ends are stored, so a figure quoted last month can be reproduced next
+month. Dates more than a year past the horizon are now rejected outright
+(`start_beyond_horizon`, 40 rows) along with two dated before Ejari existed.
+
+### D-070 · Below the floor no median is computed, rather than computed and withheld
+**2026-09-10** — G5 says a thin cell produces no figure. There are two ways to
+honour that: compute every median and refuse to return the thin ones, or never
+compute them. The second is chosen everywhere it is available.
+
+The aggregate writes `median_annual_rent` as NULL below `min_contracts_for_answer`,
+so for a four-contract cell **the number does not exist in the database at all**.
+Nothing downstream can decide to speak it, log it, or put it on an evidence pack,
+because there is nothing there. The contract count is kept — "we found only four"
+is the honest thing to say and needs the four.
+
+The floor the table was built under is recorded on the `aggregates` row, so a
+figure can be explained later against the rule that produced it, and the lookup
+re-checks the count against its own settings in case the two ever differ.
+
+### D-071 · G5 at the lookup is a property of the type
+**2026-09-10** — `Comparable` refuses construction if a non-`ok` status carries a
+`median_annual_rent`, or a `full_confidence` flag. Every refusal path — thin,
+stale, unknown area — is one `return` away from carrying a number by accident,
+and this makes the accident impossible to express rather than merely absent from
+the current code.
+
+Same shape as `EvaluationRecord`, and for the same reason: the guarantee has to
+live somewhere that a future edit cannot quietly step around.
+
+### D-072 · Staleness is measured from the release, not from the ingest
+**2026-09-10** — Measured from `computed_at`, a nightly job pointed at an old
+file would report perfectly fresh comparables for ever. Re-processing an old
+release does not make it new, and the clock that matters belongs to the newest
+contract in it.
+
+Staleness is also asked **before** thinness. Telling a caller "not enough
+contracts in your area" when the real problem is that our whole release is six
+months old is both wrong and unactionable — there is nothing they can do about
+it, and it points them at the wrong thing.
+
+**This has a live consequence.** The 2026-02-26 release has a horizon of
+2026-03-01, which is 193 days old today, against a `market_snapshot_max_age_days`
+of 120. Every lookup therefore returns `stale`, and every rent-increase answer
+that would have relied on it returns HUMAN_REVIEW_REQUIRED. **That is the system
+working, and it is also a blocker for the demo.** The 120 has no recorded
+rationale — it was declared in T0.9 and never justified — so this is not a case
+of data failing a considered threshold. See the open question in plan.md T2.3.
+
+### D-073 · A missing derived input is our refusal, not the caller's mistake
+**2026-09-10** — `_coerce_inputs` raised `MissingInputError` for any absent
+required input, derived ones included. But a derived input is one *we* supply, so
+our failing to supply it is exactly the G5 refusal — and raising there would send
+"we have too little market data" back as a 422 blaming the caller for our gap.
+
+A required input that is not derived is still the caller's to provide and still
+raises. A derived one may be absent, and grading turns that into
+HUMAN_REVIEW_REQUIRED. A second check closes behind it: if grading says the rule
+is answerable, every declared input must be present before the rule runs, so a
+grading bug cannot reach the rule logic with a hole in its inputs.
+
+### D-074 · Market data is optional at boot and named in the health check
+**2026-09-10** — The rules engine, the notice rule and a caller-supplied figure
+all work without comparables. A service that refuses to start because one dataset
+is missing takes down three things that were fine.
+
+So a missing database logs a warning and `/healthz` reports
+`market_data_loaded: false`, degrading `status`. `GET /comparables` answers 503
+with the command that builds it. What is not acceptable is looking healthy while
+a dataset the product advertises is absent.
+
+`market_data_fresh` is a **separate** check, because a loaded snapshot older than
+we will quote answers every lookup with `stale` — which reads as a broken service
+unless the health check says why.
+
+This retires the last `not_yet_checked` entry. `market_snapshot` had been
+deferred there since T1.7.
+
+### D-075 · The application is built once, not once per attribute lookup
+**2026-09-10** — `__getattr__` returned `create_app()` without caching, and
+uvicorn accesses `bayyina.api.app:app` more than once. Every boot therefore built
+**two complete applications**: corpus verified twice, comparables database read
+twice, static directory mounted twice.
+
+The part that matters is not the wasted second. Two `AuditLog` objects existed,
+each holding its own `threading.Lock` over the same file. Only one was ever
+served, so the hash chain was never actually at risk — but a second lock over the
+same log is exactly the shape of the concurrency bug D-035 exists to prevent, and
+it should not be one refactor away from being live.
+
+Fixed by writing the built app into the module namespace, so later lookups find
+it there and never reach `__getattr__` again (PEP 562). Both halves of the
+contract are now asserted: built exactly once however often it is looked up, and
+still not built at import, so a broken corpus fails the process that asked for an
+app rather than every test collection that imported `create_app`.
+
+**Found by counting boot lines in a running container**, not by any test. T2.3
+made it visible: two cheap corpus loads look like a log formatting quirk, two
+database reads do not.
+
+### D-076 · Freshness has two thresholds, and ageing data is disclosed not refused
+**2026-09-10** — A single `market_snapshot_max_age_days` made staleness a cliff:
+either the figure was quoted with nothing said, or nothing was quoted at all.
+With a 193-day-old release and a 120-day limit, that meant **every rent question
+returned HUMAN_REVIEW_REQUIRED**. The tempting fix was to raise 120 until our
+file passed, which is the one change that makes a guardrail decorative.
+
+Measured instead. Drift in the median cell, on pairs from 2024-09 onward:
+
+| apart | median | p90 |
+|---|---|---|
+| 3 months | 3.4% | 10.7% |
+| 6 months | 4.3% | 12.6% |
+| 12 months | 6.1% | 15.4% |
+
+**The rent-cap bands are five percentage points wide.** Past a year the median
+cell has moved more than a whole band, so a stale figure can flip a verdict. Under
+four months it has moved under ~3.5% and cannot.
+
+So: `market_snapshot_fresh_days` (120) is where we start *saying* the figure is
+ageing, and `market_snapshot_max_age_days` (365) is where we stop quoting it.
+Between them the answer is given and carries `MARKET_DATA_AGEING` naming the date
+it rests on. The old 120 survives as the disclosure point because the measurement
+supports it — it previously had **no recorded rationale anywhere**.
+
+This is the same shape as the comparable-count bands: `THIN_COMPARABLE_DATA`
+discloses depth, `MARKET_DATA_AGEING` discloses recency. They **accumulate rather
+than rank** — a thin *and* ageing comparable owes the listener both facts, and
+reporting only the worse one would let someone act believing they had heard
+everything wrong with the figure.
+
+`age_days` is `None` for a caller-supplied figure. We cannot vouch for the
+recency of a number we did not derive, and implying we checked is worse than
+saying nothing.
+
+**A design mistake caught while wiring it:** `market_data_fresh` was first added
+to `/healthz` as a pass/fail check, which would have reported `degraded` for
+eight months of every publication cycle — and a service that is always degraded
+is one nobody reads the health of. It is now `market_data_usable` (can we answer
+at all), with the age reported as a plain fact beside it.
+
+### D-077 · The freshest data available is not on Dubai Pulse
+**2026-09-10** — `www.dubaipulse.gov.ae` refuses connections outright, from two
+independent networks. It is not a client problem and not a temporary blip we can
+wait out.
+
+Two other official hosts are live: `api.dubaipulse.gov.ae` (OAuth, needs a key)
+and `dubailand.gov.ae`, whose Real Estate Data portal exports the same registry
+as CSV. A Transactions export pulled from it on 2026-09-10 ran **to that same
+day** and returned 154,262 rows uncapped — so the portal has current data and
+will bulk-export it.
+
+It is not a drop-in replacement. The portal's Rents tab returns `Annual Amount`,
+`No of Units`, `Number of Rooms` — and **no contract identifier at all**, which
+is what de-duplicates multi-property contracts. It also serves only the current
+year ("For previous year data kindly visit Dubai Pulse"), so it supplements the
+Pulse history rather than replacing it.
+
+Third-party mirrors exist and are rejected: using one would break the claim that
+**no government permission is required for any part of the product to work**,
+which is a load-bearing part of the pitch, not a convenience.
+
+`scripts/inspect_release.py` exists because of this. It reports what a file has,
+which columns need mapping, whether a paginated export truncated, and the
+horizon — so the next person to download one does not need to ask.
+
+### D-078 · Recency is the cell's, never the release's
+**2026-09-10** — D-076 built two freshness thresholds on `age_days`, and
+`age_days` was the age of the *snapshot*. It should have been the age of the
+figure being quoted, and for a tenth of the table those are not the same number.
+
+Measured on the real release: of 841 quotable cells, **98 trail the horizon by
+more than a month**, 10 by more than three, and one — `al rowaiyah first / flat /
+studio`, 72 contracts — has a newest contract of 2025-07-19. That cell is **418
+days old**, past the 365-day refusal threshold, and it was being quoted with a
+"193 days" label attached.
+
+So the aggregate stores `newest_contract` per cell and the lookup computes age
+from it. `Al Rowaiyah First` now returns `stale` with no figure, which is what it
+always should have done.
+
+`ComparableStore.age_days()` survives as the release's own age, because that is
+the right question for a health check — is this deployment's data worth anything
+at all — and the wrong one for a lookup. The two are documented against each
+other so the next reader does not reach for the convenient one.
+
+The aggregation also now reports `oldest_quotable_contract`, so a build says at
+build time whether it has produced figures already too old to quote. Learning
+that once is cheaper than learning it one request at a time.
+
+### D-079 · An `unknown_area` that offers nothing next is a dead end
+**2026-09-10** — `/comparables` answers `unknown_area` when it cannot resolve a
+place. The agent has then told someone we do not know where they live and has
+nothing to say next, which on a phone call is where people hang up.
+
+`GET /areas` returns all 184, by **display name** rather than by `area_key` —
+`area_key` is our normalisation and nobody says "al barshaa south third" out
+loud. Small enough to return whole, and small enough for an agent to match a
+spoken place against. A test asserts every listed name actually resolves, because
+a list containing something `/comparables` then rejects would send the agent
+round a loop.
+
+Alongside it, a boundary correction. `"   "` and `"!!!"` both passed
+`min_length=1`, normalised to the empty key and came back as `unknown_area` —
+technically true and useless. "We don't know that area" implies we looked.
+Something that is not a place name is now a 422 that says so and points at
+`/areas`, on both routes, because an agent that learns one of them lies stops
+trusting either.
+
+The distinction is deliberate: **"Narnia" is an outcome** — a real place name we
+cannot resolve — **and punctuation is a malformed request**.
+
+### D-080 · The palette is measured, and two colours failed
+**2026-09-10** — T2.0 asks for "colour with **WCAG AA contrast verified**". It was
+not verified; it was asserted in a comment. Measured:
+
+* **`ink-300` at 2.46:1** — well under AA. Defined, used by nothing. Deleted
+  rather than corrected: a token that exists will eventually be reached for, and
+  the palette does not need a fourth ink.
+* **`rule` at 1.26:1 — on the border of the rent input.** The one field a person
+  has to find and type into had a boundary they could not see.
+
+That second one is a design error, not a rounding error, and it produced the
+split the system now has. **`rule`** separates rows of text and carries no
+meaning if unseen. **`edge`** (#8a8370, 3.6:1) is any boundary a person must be
+able to *find*. WCAG 1.4.11 asks 3:1 for the latter and nothing for the former,
+and collapsing them meant every boundary took the weaker number.
+
+`src/test/contrast.test.ts` computes every ratio from `index.css` itself, so the
+claim is recomputed on every run rather than being true on the day it was typed.
+
+**Two of the four tests in it proved nothing when first written**, and were only
+found by breaking the code they guard:
+
+* the focus-ring test matched `outline:` — which `outline: none` also matches, so
+  deleting the ring left it green
+* the interactive-border test scanned line by line, and a `className` five lines
+  below its `<input` matched nothing. Then `[^>]*` was tried, which stops at the
+  first `>` — and `onChange={(e) => ...}` has one. It now tracks brace depth,
+  strips comments from the tag (the version before flagged its own explanation),
+  and carries a guard asserting it finds elements at all, because a scan that
+  matches nothing reports success either way.
+
+### D-081 · Three scripts are bundled, not fetched
+**2026-09-10** — Noto, because it is the only family covering Latin, Arabic and
+Malayalam with one design, so two of the three languages are not visibly bolted
+on. Six files, 175 KB, self-hosted.
+
+Not Google Fonts. A page about someone's tenancy dispute should not announce
+itself to a third party on load; the strict CSP forbids it anyway; and the PDF
+pipeline (T2.5) needs the same faces on disk, so a CDN would mean the artifact a
+resident carries into a hearing renders differently from the page that produced
+it.
+
+Only 400 and 600. A type system with seven weights is one nobody keeps
+consistent.
+
+### D-082 · The specimen is built from the product's own stylesheet
+**2026-09-10** — `specimen.html` is a second Vite entry that imports
+`src/index.css`, and its swatch grid reads computed values off
+`document.documentElement` rather than repeating hexes. A specimen maintained
+separately is wrong within a month, and a wrong specimen is worse than none.
+
+**Its Arabic pane is genuinely `dir="rtl"`**, so what it shows is the mirroring
+rather than a picture of it.
+
+T2.0's DoD asks for "one page rendered in all three languages". That is **not
+what this is**, and saying so matters: Arabic and Malayalam are not translated
+(D-065), so the panes carry *typographic* text that states it is not product
+copy. What the page demonstrates is that the three script stacks render at the
+same sizes with the same rhythm, and that RTL mirrors. The translated product
+page is T2.7 plus a translator.
+
+### D-083 · A test fixture was adding a rule to the production stylesheet
+**2026-09-10** — Tailwind v4 scans every file in the project for class names.
+`styling-safety.test.ts` documents the banned v3 syntax `bg-[--color-ink-900]`,
+so Tailwind found that string and **emitted the utility into the shipped CSS** —
+`background-color:--color-ink-900`, with no `var()`, an invalid declaration that
+does nothing. The test that exists to ban the syntax was the reason it shipped.
+
+`@source not "./**/*.test.ts"` excludes tests from the scan, and a new test
+asserts no such utility reaches the build. When that test was first written its
+own explanatory comment leaked a second one, which is how it was confirmed to
+work.
+
+### D-084 · The evidence pack refuses a language rather than falling back
+**2026-09-10** — The plan's own test asks that a pack render in all three
+languages. It cannot: Arabic and Malayalam are untranslated (D-065), and the
+straightforward way to make that test pass is an English fallback.
+
+**The plan also says an English PDF for a Malayalam caller is a failed
+delivery.** A fallback is exactly how that happens without anyone noticing — the
+call completes, the pack sends, and the person cannot read the document they were
+told to take to the Rental Dispute Centre. So `build_pack` raises
+`UnsupportedLanguageError`, naming what is available.
+
+`supported_languages()` is **derived from the template directories**, not listed,
+so a language becomes supported the moment someone drops a translated
+`pack.txt.j2` in — no code change, no second place to remember. Same shape as the
+interface's switcher.
+
+Each unsupported language carries a `_TRANSLATION_NEEDED.md` saying what is
+needed and why it is blocked, and a test asserts the note exists and points at
+the glossary. A gap nobody can find is a gap nobody closes. The Arabic note
+states the real blocker — the official Arabic of Decree 43/2013 exists and must
+be sourced rather than back-translated — and the Malayalam note states the
+opposite, that no official register exists, because a translator told to source
+something that does not exist will simply stop.
+
+### D-085 · Vocabulary lives in one module, never in a template
+**2026-09-10** — The first pack printed `Gap pct: 0.058824` and
+`Current annual rent: 80000`. Both are wrong twice over: GLOSSARY section 1 gives
+every internal name a different user-facing word on purpose — "the most they can
+charge", never "legal rent", because the latter sounds like a fixed official
+figure — and section 4 requires **AED 80,000**, never a bare number.
+
+`wording.py` holds the mapping and the shape of every field. Templates carry no
+vocabulary at all, so a translator working on the Arabic pack does not also have
+to know that `gap_pct` is called "how far below the average", and there is no
+second place for the glossary to drift.
+
+**A field with no wording raises.** It does not fall back to its own name, so
+adding a computed field forces a decision about how to say it out loud — which is
+where that decision belongs, rather than in a template a fortnight later.
+
+### D-086 · `pip install .` would have shipped no templates
+**2026-09-10** — setuptools copies `.py` and nothing else unless told. The
+evidence templates are `.j2`, and there was no `package-data` declaration — so
+the container would have built, booted, verified its corpus, served `/healthz`,
+and then failed on the **first evidence pack** with "template not found". The
+worst moment and the least obvious cause.
+
+Declared explicitly rather than through `include-package-data`, which depends on
+what the VCS happens to be tracking. Guarded by a test that sweeps every
+non-Python file under `src/bayyina` and asserts a pattern covers it, so the next
+one added is caught the same way — verified against a real `pip install`, and CI
+now renders a pack inside the built image, which is the only place that proves
+the templates made the journey.

@@ -161,6 +161,53 @@ jobs:
           grep -q '"verdict":"not_permitted"' verdict.json || { echo "wrong verdict"; exit 1; }
           grep -q '"clause":"Article 1"' verdict.json      || { echo "citation missing"; exit 1; }
 
+          echo "--- market data is absent here, and the image says so ---"
+          # `comparables.duckdb` is gitignored, so a CI checkout has none. That is
+          # a supported state (D-074), and the point of this check is that the
+          # image degrades *honestly*: it names the missing dataset rather than
+          # reporting healthy, and everything not depending on it still works.
+          grep -q '"market_data_loaded":false' health.json || {
+            echo "expected the image to report market data as absent"; exit 1; }
+          grep -q '"status":"degraded"' health.json || {
+            echo "a missing dataset must degrade status, not pass silently"; exit 1; }
+          grep -q '"not_yet_checked":\[\]' health.json || {
+            echo "nothing should still be deferred"; exit 1; }
+
+          echo "--- and asking for a derived figure says how to fix it ---"
+          code=$(curl -s -o comparables.json -w '%{http_code}'             'http://127.0.0.1:8000/comparables?area=Al%20Barsha%20First&kind=flat&bedrooms=2')
+          cat comparables.json; echo
+          [ "$code" = "503" ] || { echo "expected 503, got $code"; exit 1; }
+          grep -q 'ingest_market' comparables.json || {
+            echo "the 503 does not say how to build the database"; exit 1; }
+
+          echo "--- the evidence pack renders inside the image ---"
+          # `pip install .` copies .py and nothing else unless told otherwise,
+          # so a missing package-data declaration produces a container that
+          # boots, verifies its corpus, serves /healthz — and then fails on the
+          # first evidence pack. The templates are not Python; this is the only
+          # place that proves they made it in.
+          docker run --rm bayyina:ci python -c "
+          from pathlib import Path
+          from bayyina.evidence.pack import build_pack, supported_languages
+          from bayyina.registry.evaluator import Evaluator, MarketEvidence
+          from bayyina.registry.loader import load_rules
+
+          assert 'en' in supported_languages(), 'no evidence template survived the install'
+          record = Evaluator(load_rules(Path('rules'))).evaluate(
+              'rent_increase.dubai.decree_43_2013',
+              {'current_annual_rent': '80000', 'proposed_annual_rent': '96000',
+               'market_average_rent': '85000'},
+              {'current_annual_rent': 'caller_stated', 'proposed_annual_rent': 'caller_stated',
+               'market_average_rent': 'dld_open_rent_contracts_derived'},
+              market=MarketEvidence(contract_count=5019, snapshot_id='s', age_days=30),
+          )
+          text = build_pack([record], 'CI-CHECK', 'en').render_text()
+          for required in ('not an official determination', 'not legal advice',
+                           'as stated by the caller', 'sha256:'):
+              assert required in text.lower() or required in text, required
+          print('evidence pack renders:', len(text), 'characters')
+          "
+
           echo "--- the container does not run as root ---"
           uid=$(docker exec bayyina id -u)
           echo "uid=$uid"

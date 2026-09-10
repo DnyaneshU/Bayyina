@@ -14,7 +14,8 @@ import yaml
 
 from bayyina.registry.schema import Rule, RuleLogic
 
-DOCS = Path(__file__).resolve().parents[2] / "docs"
+ROOT = Path(__file__).resolve().parents[2]
+DOCS = ROOT / "docs"
 ARCHITECTURE = DOCS / "ARCHITECTURE.md"
 
 
@@ -146,3 +147,85 @@ def test_the_canvas_status_table_reports_the_real_counts():
 def test_no_template_placeholder_survives():
     """T0.1's definition of done."""
     assert "from template" not in CANVAS.read_text(encoding="utf-8")
+
+
+def test_no_deferral_marker_names_a_task_that_is_already_done():
+    """A `NOT YET CONSUMED - T2.1` marker outlives the task it names.
+
+    T2.1 shipped and two markers still pointed at it — one on
+    `market_snapshot_max_age_days`, one on the `/healthz` deferral — so both read
+    as "this is coming in the work we just finished". A reader has no way to tell
+    a genuine deferral from a stale one, which is how the deferral list stops
+    being trustworthy. The plan's own tick is the source of truth.
+    """
+    plan = (ROOT / "plan.md").read_text(encoding="utf-8")
+    completed = {
+        task
+        for task, tail in re.findall(r"^##\s+(T\d+\.\d+)\s+—([^\n]*)$", plan, re.MULTILINE)
+        if "✅" in tail
+    }
+    assert completed, "no completed tasks found in plan.md — has its heading format changed?"
+
+    stale: list[str] = []
+    for path in sorted((ROOT / "backend" / "src").rglob("*.py")):
+        text = path.read_text(encoding="utf-8")
+        for task in re.findall(r"NOT YET CONSUMED\s*[-–—]\s*(T\d+\.\d+)", text):
+            if task in completed:
+                stale.append(f"{path.relative_to(ROOT)} defers to {task}, which is complete")
+
+    assert not stale, "stale deferral markers:\n  " + "\n  ".join(stale)
+
+
+def test_every_deferral_marker_names_a_real_task():
+    """A deferral pointing at a task number that does not exist is worse than
+    none: it looks planned and is not."""
+    plan = (ROOT / "plan.md").read_text(encoding="utf-8")
+    known = set(re.findall(r"^##\s+(T\d+\.\d+)\s+—", plan, re.MULTILINE))
+
+    unknown: list[str] = []
+    for path in sorted((ROOT / "backend" / "src").rglob("*.py")):
+        for task in re.findall(
+            r"NOT YET CONSUMED\s*[-–—]\s*(T\d+\.\d+)", path.read_text(encoding="utf-8")
+        ):
+            if task not in known:
+                unknown.append(
+                    f"{path.relative_to(ROOT)} defers to {task}, which is not in plan.md"
+                )
+
+    assert not unknown, "deferral markers naming unknown tasks:\n  " + "\n  ".join(unknown)
+
+
+def test_the_documented_database_filenames_are_the_ones_we_write():
+    """ARCHITECTURE once said `data/rent_contracts.duckdb`; the code wrote
+    `data/market.duckdb`.
+
+    Nothing caught it, because a filename is neither a module nor a script. An
+    operator following the document would have looked for a file that is never
+    created — and, worse, might have created it.
+
+    There are two now, and the distinction matters: the build database is 359 MB
+    of contract rows and is never shipped, while the serving database is 1.3 MB
+    and is what the image carries. A document that confuses them would send
+    someone to deploy the wrong one.
+    """
+    script = (ROOT / "backend" / "scripts" / "ingest_market.py").read_text(encoding="utf-8")
+    written = set(re.findall(r'default=Path\("data/([^"]+\.duckdb)"\)', script))
+    assert len(written) == 2, f"expected a build and a serving database, found {written}"
+
+    app_source = (ROOT / "backend" / "src" / "bayyina" / "api" / "app.py").read_text("utf-8")
+    served = re.search(r'Path\(settings\.data_dir\)\s*/\s*"([^"]+\.duckdb)"', app_source)
+    assert served, "the app no longer names a default comparables database"
+    assert served.group(1) in written, (
+        f"the service reads {served.group(1)}, which the ingest never writes"
+    )
+
+    for document in (ARCHITECTURE, ROOT / "README.md"):
+        mentioned = {
+            Path(name).name
+            for name in re.findall(r"[\w./-]*\.duckdb", document.read_text(encoding="utf-8"))
+        }
+        unknown = mentioned - written
+        assert not unknown, (
+            f"{document.name} names {sorted(unknown)}, which the code never writes. "
+            f"It writes {sorted(written)}"
+        )

@@ -46,3 +46,6 @@ backend/data/audit.jsonl
 .idea/
 .DS_Store
 Thumbs.db
+
+# setuptools leaves this behind on `pip install .`. Build output, never source.
+backend/build/

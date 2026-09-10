@@ -459,13 +459,16 @@ it proves this is not a litigation funnel.
 ## 8. Data Pipeline
 
 ```
-Dubai Pulse dld_rent_contracts-open   (OAuth API or bulk CSV)
+Dubai Pulse dld_rent_contracts-open   (bulk parquet, 9,798,685 rows, 200 MB)
         │
-        ▼  market/ingest.py
-   DuckDB: data/rent_contracts.duckdb
+        ▼  market/normalise.py    pure rules: scope, bedrooms, area keys
+        ▼  market/ingest.py       ✅ T2.1 · build time only, ~30 s
+   DuckDB: data/market.duckdb
+     snapshots · contracts · areas · rejections
         │
-        ▼  market/comparables.py
-   median annual rent BY (area, property_type, bedrooms)
+        ▼  market/aggregate.py    ✅ T2.2 · medians materialised at build time
+        ▼  market/comparables.py  ✅ T2.3 · in-memory lookup, 7 µs at p95
+   median annual rent BY (area_key, property_type, bedrooms)
    + contract_count, confidence, snapshot_id, computed_at
         │
         ▼
@@ -473,9 +476,74 @@ Dubai Pulse dld_rent_contracts-open   (OAuth API or bulk CSV)
    input_sources.market_average_rent = "dld_open_rent_contracts_derived"
 ```
 
+**Nothing above the aggregate runs at request time.** A `GROUP BY` over 9.8M rows
+cannot meet the 150 ms budget, so ingest and aggregation happen when the image is
+built and a request only ever reads a small indexed table.
+
+### What the ingest stores
+
+| Table | One row per | Why it exists |
+|---|---|---|
+| `snapshots` | ingest run | Source name, **sha256 of the exact bytes**, `computed_at`, and every stage count. A comparable figure that cannot be traced to a file is not evidence |
+| `contracts` | tenancy kept | `area_key`, `property_type`, `bedrooms`, `annual_rent` as `decimal(12,2)`, both dates |
+| `areas` | resolvable area | Maps a caller's spelling to a neighbourhood without a fuzzy search at call time |
+| `rejections` | reason | Named counts. A rejection nobody can name is a rejection nobody can investigate |
+| `aggregates` | aggregation run | The window, the answer floor it was built under, and what it covered |
+| `comparables` | (area, kind, bedrooms) | `contract_count` and `newest_contract` always; `median_annual_rent` **only at or above the floor** |
+
+Contracts and their snapshot row are written **in one transaction**. Written
+piecemeal, a crash between them leaves figures with no source, no digest and no
+date, and they look entirely normal to every query that reads them.
+
+### Scope, and why it is an intersection
+
+`property_usage_en = 'Residential'` is not a residential tenancy. It includes
+1,120,410 labour-camp contracts (median **AED 504,000**) and 1,375,195
+whole-block agreements whose `annual_amount` covers every property on the
+contract, not one home. A row must satisfy **all** of: residential usage, a
+dwelling property type, a sub-type carrying a bedroom count, and
+`no_of_prop = 1`. Neither type nor sub-type is sufficient alone — 'Room in labor
+Camp' appears 3,234 times under `Flat`, and 'Studio' 6,552 times under
+`Labor Camps`.
+
+Measured effect: raw `Residential` in Jabal Ali Industrial has a median of AED
+829,720; after scope rules, **AED 32,000**.
+
 **G5 thresholds:** under 30 comparable contracts reduces confidence; under 10
 returns `HUMAN_REVIEW_REQUIRED` and no number may be spoken or printed.
 **Snapshots are immutable and dated**, so any past answer reproduces exactly.
+
+### The four things a lookup can say
+
+| Status | When | What the agent says |
+|---|---|---|
+| `ok` | At or above the floor, and inside `max_age` | The figure — plus its thinness under 30 contracts, plus its date past `fresh_days` |
+| `insufficient_data` | Below the floor, or a cell we hold nothing for | "Only N registered contracts" — never a number |
+| `stale` | **This cell's** newest contract is past `market_snapshot_max_age_days` | "Our data for that runs to July" — never a number, however thick the cell |
+| `unknown_area` | We cannot resolve the area at all | "Which area?" — and `GET /areas` is what it offers next |
+
+Freshness has two thresholds, not one. Under `market_snapshot_fresh_days` the
+figure is quoted plainly; between that and `max_age` it is quoted with
+`MARKET_DATA_AGEING` naming the date it rests on; past `max_age` there is nothing
+to quote. Measured drift per cell is 3.4% at three months, 4.3% at six and 6.1%
+at twelve, against rule bands five percentage points wide — so past a year a
+stale median can flip a verdict, and under four months it cannot (D-076).
+
+Depth and recency **accumulate rather than rank**: a thin *and* ageing comparable
+carries both conditions, because reporting only the worse one would let someone
+act believing they had heard everything wrong with the figure.
+
+Staleness is asked **first**, and measured from **the cell's own newest
+contract** — not from `computed_at`, and not from the release's horizon either.
+Of 841 quotable cells, 98 trail the horizon by more than a month and one is 418
+days old inside a release that is 193 days old. Recency decides refusals, so it
+has to be the age of the evidence being quoted (D-078). Re-running the ingest over an old release must not make it
+fresh, and telling someone "not enough contracts in your area" when the real
+problem is a six-month-old release is both wrong and unactionable.
+
+`Comparable` refuses to hold a `median_annual_rent` unless its status is `ok`, so
+G5 at this layer is a property of the type rather than of the branch that built
+the object.
 
 ---
 

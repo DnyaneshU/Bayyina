@@ -17,6 +17,7 @@ from pydantic import ValidationError
 
 from bayyina.registry.evaluator import (
     Citation,
+    Condition,
     EvaluationRecord,
     Evaluator,
     MarketEvidence,
@@ -420,3 +421,139 @@ def test_human_review_carries_no_conditions(signed_rules):
     """There is no answer here for a condition to qualify."""
     record = _rent(signed_rules, market=MarketEvidence(contract_count=4, snapshot_id="s"))
     assert record.conditions == []
+
+
+def test_a_rule_never_runs_with_a_hole_where_a_derived_figure_should_be(signed_rules):
+    """The check that closes behind the relaxed input validation.
+
+    A *derived* input may now be absent, because our failing to supply one is
+    the G5 refusal rather than a caller error (D-073). That is safe only while
+    grading and the absence stay in step.
+
+    So: hand the evaluator evidence deep enough to grade as answerable, with the
+    figure that evidence supposedly describes missing. It must refuse rather than
+    reach the rule logic with a hole in its inputs.
+
+    Unreachable through the API, which passes `contract_count=0` whenever it has
+    no figure — which is exactly why it is asserted here. A guard nothing
+    exercises is a guard nobody knows is broken.
+    """
+    inputs = {name: value for name, value in RENT_INPUTS.items() if name != "market_average_rent"}
+    sources = {name: value for name, value in RENT_SOURCES.items() if name != "market_average_rent"}
+
+    with pytest.raises(MissingInputError, match="graded as answerable"):
+        Evaluator(signed_rules, settings=THRESHOLDS).evaluate(
+            RENT, inputs, sources, market=DEEP_MARKET
+        )
+
+
+def test_a_missing_derived_figure_with_thin_evidence_is_an_outcome_not_an_error(signed_rules):
+    """The other half of D-073, and the one a caller actually meets.
+
+    Too little market data is our gap, not theirs. It must arrive as
+    HUMAN_REVIEW_REQUIRED — an answer — rather than as a 422 telling a resident
+    they forgot a field they were never asked for.
+    """
+    inputs = {name: value for name, value in RENT_INPUTS.items() if name != "market_average_rent"}
+    sources = {name: value for name, value in RENT_SOURCES.items() if name != "market_average_rent"}
+
+    record = Evaluator(signed_rules, settings=THRESHOLDS).evaluate(
+        RENT, inputs, sources, market=MarketEvidence(contract_count=0, snapshot_id="snap_test")
+    )
+
+    assert record.state is OutcomeState.HUMAN_REVIEW_REQUIRED
+    assert record.verdict is None
+    assert record.computed == {}
+    assert record.confidence is None
+
+
+def test_a_caller_owed_field_is_still_their_responsibility(signed_rules):
+    """Relaxing validation for derived inputs must not relax it for the rest.
+
+    `current_annual_rent` is the caller's own fact. Its absence is a caller
+    error and must still raise, or the relaxation would have quietly turned
+    every missing field into a shrug.
+    """
+    inputs = {name: value for name, value in RENT_INPUTS.items() if name != "current_annual_rent"}
+    sources = {name: value for name, value in RENT_SOURCES.items() if name != "current_annual_rent"}
+
+    with pytest.raises(MissingInputError, match="current_annual_rent"):
+        Evaluator(signed_rules, settings=THRESHOLDS).evaluate(
+            RENT, inputs, sources, market=DEEP_MARKET
+        )
+
+
+# --- Recency, alongside depth -------------------------------------------------
+
+
+def test_an_ageing_figure_is_disclosed_rather_than_refused(signed_rules):
+    """The middle band. A figure from March is worth having in September as long
+    as the person is told it is from March."""
+    settings = Settings(
+        min_contracts_for_answer=10,
+        min_contracts_for_full_confidence=30,
+        market_snapshot_fresh_days=120,
+    )
+    record = Evaluator(signed_rules, settings=settings).evaluate(
+        RENT,
+        RENT_INPUTS,
+        RENT_SOURCES,
+        market=MarketEvidence(contract_count=5000, snapshot_id="2026-Q1", age_days=193),
+    )
+
+    assert record.state is OutcomeState.CLEAR_WITH_CONDITIONS
+    assert record.conditions == [Condition.MARKET_DATA_AGEING]
+    assert record.verdict is not None, "an ageing figure still produces an answer"
+
+
+def test_a_fresh_figure_carries_no_condition(signed_rules):
+    """A condition on every answer is a condition nobody reads."""
+    settings = Settings(
+        min_contracts_for_answer=10,
+        min_contracts_for_full_confidence=30,
+        market_snapshot_fresh_days=120,
+    )
+    record = Evaluator(signed_rules, settings=settings).evaluate(
+        RENT,
+        RENT_INPUTS,
+        RENT_SOURCES,
+        market=MarketEvidence(contract_count=5000, snapshot_id="2026-Q3", age_days=30),
+    )
+    assert record.state is OutcomeState.CLEAR
+    assert record.conditions == []
+
+
+def test_depth_and_recency_are_reported_together(signed_rules):
+    """Independent properties of the same evidence. Ranking them would let a
+    caller act believing they had heard everything wrong with the figure."""
+    settings = Settings(
+        min_contracts_for_answer=10,
+        min_contracts_for_full_confidence=30,
+        market_snapshot_fresh_days=120,
+    )
+    record = Evaluator(signed_rules, settings=settings).evaluate(
+        RENT,
+        RENT_INPUTS,
+        RENT_SOURCES,
+        market=MarketEvidence(contract_count=15, snapshot_id="2026-Q1", age_days=193),
+    )
+
+    assert set(record.conditions) == {
+        Condition.THIN_COMPARABLE_DATA,
+        Condition.MARKET_DATA_AGEING,
+    }
+    assert record.confidence == 0.5
+
+
+def test_a_figure_we_did_not_derive_makes_no_claim_about_its_age(signed_rules):
+    """`age_days` is None for a caller-supplied figure. We cannot vouch for the
+    recency of a number we did not derive, and implying we checked would be
+    worse than saying nothing."""
+    record = Evaluator(signed_rules, settings=THRESHOLDS).evaluate(
+        RENT,
+        RENT_INPUTS,
+        RENT_SOURCES,
+        market=MarketEvidence(snapshot_id="user_supplied"),
+    )
+    assert record.conditions == [Condition.MARKET_AVERAGE_NOT_DERIVED]
+    assert Condition.MARKET_DATA_AGEING not in record.conditions

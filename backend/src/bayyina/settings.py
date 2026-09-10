@@ -40,10 +40,32 @@ class Settings(BaseSettings):
     min_contracts_for_answer: int = 10
     min_contracts_for_full_confidence: int = 30
 
-    # NOT YET CONSUMED - T2.1, when the market snapshot exists. Declared here so
-    # the threshold is decided once, in the open, rather than appearing as a
-    # literal in the ingest code later.
-    market_snapshot_max_age_days: int = 120
+    # Freshness has two thresholds, not one, and both are measured from the
+    # newest contract in the release - never from when we processed it. Re-running
+    # an ingest over an old file does not make it new.
+    #
+    # **Measured on 5.3M contracts, pairs from 2024-09 onward:**
+    #
+    #   | apart    | median cell drift | p90   |
+    #   |----------|-------------------|-------|
+    #   | 3 months | 3.4%              | 10.7% |
+    #   | 6 months | 4.3%              | 12.6% |
+    #   | 12 months| 6.1%              | 15.4% |
+    #
+    # The rent-cap bands are five percentage points wide (0/5/10/15/20%), so
+    # these are the numbers that decide whether staleness can flip a verdict.
+    #
+    # Under `fresh`, drift sits under ~3.5% and the figure is quoted plainly.
+    # Between the two, it is quoted with the condition MARKET_DATA_AGEING naming
+    # the date it came from - the same shape as THIN_COMPARABLE_DATA, which
+    # discloses depth rather than recency. Past `max_age` the median cell has
+    # moved more than a whole band and the figure no longer describes the market,
+    # so there is nothing to quote.
+    #
+    # The previous single threshold of 120 had **no recorded rationale anywhere**.
+    # It survives as the disclosure point because the measurement supports it.
+    market_snapshot_fresh_days: int = 120
+    market_snapshot_max_age_days: int = 365
 
     # NOTE: rule parameters do NOT belong here.
     #

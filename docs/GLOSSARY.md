@@ -158,6 +158,20 @@ harder writing problem than writing for a lawyer.
 **Machine translation is not acceptable for any string in this file.** A
 mistranslated disclosure is a compliance failure, not a typo.
 
+### What ships in the meantime
+
+The web interface **offers only the languages it can actually render**. It does
+not show a language button that falls back to English, and it shows no switcher
+at all while there is one language (D-065).
+
+This is derived from `_TRANSLATION_STATUS`, so **filling in a locale file and
+removing its marker is the whole of the work** — the button appears on its own,
+with no component to edit. Arabic and Malayalam remain in `LANGUAGES`, in the PDF
+template paths and in the voice scripts, because they are the product: rule 3
+above is also the reason Arabic cannot simply be drafted here, since the official
+Arabic forms of Decree 43/2013 and Law 26/2007 exist and must be sourced rather
+than back-translated.
+
 ---
 
 ## 7 · Dependencies

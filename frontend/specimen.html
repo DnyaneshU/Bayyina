@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="noindex" />
+    <title>Bayyina · design system</title>
+    <!--
+      The T2.0 specimen. It imports the product's own index.css rather than a
+      copy, so what is shown here is what ships — a specimen that drifts from
+      the system it documents is worse than none.
+
+      Three panes at 360px, the width the interface is designed at. The Arabic
+      pane carries dir="rtl", so the mirroring shown is the real thing rather
+      than a mock-up of it.
+
+      The copy in the Arabic and Malayalam panes is *typography*, not product
+      text: those locales are not translated (D-065), and pretending otherwise
+      on the page that documents our design standards would be the wrong place
+      to start. What it demonstrates is that the three script stacks render, at
+      the same sizes, with the same rhythm.
+    -->
+    <script type="module" src="/src/specimen.ts"></script>
+  </head>
+  <body class="bg-paper text-ink-700">
+    <main class="mx-auto max-w-6xl px-4 py-8">
+      <header class="mb-8 border-b border-rule pb-6">
+        <h1 class="text-3xl font-semibold text-ink-900">
+          Bayyina — design system
+        </h1>
+        <p class="mt-2 text-base text-ink-500">
+          T2.0. Every colour pair below is asserted against WCAG AA in
+          <code class="tabular text-sm">src/test/contrast.test.ts</code>. Every
+          size comes from <code class="tabular text-sm">index.css</code>.
+        </p>
+      </header>
+
+      <!-- ---------------------------------------------------------------- -->
+      <section class="mb-10">
+        <h2 class="mb-1 text-xl font-semibold text-ink-900">
+          Three scripts, one design
+        </h2>
+        <p class="mb-4 max-w-2xl text-sm text-ink-500">
+          Noto, because it is the only family covering all three with one design
+          — so Arabic and Malayalam are not visibly bolted on. Bundled, never
+          fetched: 175&nbsp;KB of subsets, no third-party request from a page
+          about someone's tenancy. Each pane is 360&nbsp;px, the width this is
+          designed at.
+        </p>
+
+        <div class="flex flex-wrap gap-4">
+          <article
+            class="w-[360px] shrink-0 rounded border border-rule bg-paper-raised p-4"
+          >
+            <p
+              class="mb-3 text-xs font-semibold tracking-wide text-ink-500 uppercase"
+            >
+              English · ltr · Noto Sans
+            </p>
+            <h3 class="text-2xl font-semibold text-ink-900">
+              That increase isn't permitted
+            </h3>
+            <p class="mt-2 text-base">
+              Your rent sits 5.9% below the market average, so the most they can
+              charge is
+              <strong class="tabular">AED&nbsp;88,000</strong>.
+            </p>
+            <p class="mt-3 text-sm text-ink-500">
+              Decree No. 43 of 2013, Article 1 · 5,019 registered contracts
+            </p>
+          </article>
+
+          <article
+            dir="rtl"
+            lang="ar"
+            class="w-[360px] shrink-0 rounded border border-rule bg-paper-raised p-4"
+          >
+            <p
+              class="mb-3 text-xs font-semibold tracking-wide text-ink-500 uppercase"
+            >
+              العربية · rtl · Noto Sans Arabic
+            </p>
+            <h3 class="text-2xl font-semibold text-ink-900">
+              بيّنة — تحقق من الزيادة
+            </h3>
+            <p class="mt-2 text-base">
+              هذا النص لعرض الخط فقط، وليس ترجمة للمنتج. الترجمة تنتظر متحدثًا
+              أصليًا.
+            </p>
+            <p class="mt-3 text-sm text-ink-500">
+              المرسوم رقم ٤٣ لسنة ٢٠١٣، المادة الأولى
+            </p>
+          </article>
+
+          <article
+            lang="ml"
+            class="w-[360px] shrink-0 rounded border border-rule bg-paper-raised p-4"
+          >
+            <p
+              class="mb-3 text-xs font-semibold tracking-wide text-ink-500 uppercase"
+            >
+              മലയാളം · ltr · Noto Sans Malayalam
+            </p>
+            <h3 class="text-2xl font-semibold text-ink-900">
+              ബയ്യിന — വാടക പരിശോധന
+            </h3>
+            <p class="mt-2 text-base">
+              ഇത് അക്ഷരരൂപം കാണിക്കാൻ മാത്രമുള്ള വാചകമാണ്, ഉൽപ്പന്നത്തിന്റെ
+              വിവർത്തനമല്ല.
+            </p>
+            <p class="mt-3 text-sm text-ink-500">
+              ഉത്തരവ് നമ്പർ 43, 2013 — വകുപ്പ് 1
+            </p>
+          </article>
+        </div>
+
+        <p class="mt-3 text-sm text-ink-500">
+          The Arabic pane is genuinely
+          <code class="tabular text-xs">dir="rtl"</code>. Its heading, body and
+          caption all begin on the right — mirroring is layout, not a font swap.
+        </p>
+      </section>
+
+      <!-- ---------------------------------------------------------------- -->
+      <section class="mb-10">
+        <h2 class="mb-1 text-xl font-semibold text-ink-900">
+          The three outcomes
+        </h2>
+        <p class="mb-4 max-w-2xl text-sm text-ink-500">
+          The whole product turns on the third one.
+          <strong>Needs a person is the system working</strong> — it is what
+          honesty looks like when the facts do not support an answer — so it
+          reads as considered, in the calm of a form, never in the red of an
+          error. Red belongs to a service that is broken, and if it ever appears
+          beside an outcome that is a bug.
+        </p>
+
+        <div class="grid gap-3 sm:grid-cols-3">
+          <div
+            class="rounded border-s-4 border-rule bg-paper-raised p-4"
+            style="border-inline-start-color: var(--color-clear)"
+          >
+            <p class="text-lg font-semibold" style="color: var(--color-clear)">
+              Clear
+            </p>
+            <p class="mt-1 text-sm">
+              The rule settles this on the figures you gave.
+            </p>
+            <p class="tabular mt-2 text-xs text-ink-500">7.0:1 · determinate</p>
+          </div>
+          <div
+            class="rounded border-s-4 border-rule bg-paper-raised p-4"
+            style="border-inline-start-color: var(--color-conditional)"
+          >
+            <p
+              class="text-lg font-semibold"
+              style="color: var(--color-conditional)"
+            >
+              Clear, with one condition
+            </p>
+            <p class="mt-1 text-sm">
+              Settled, resting on one thing we could not check.
+            </p>
+            <p class="tabular mt-2 text-xs text-ink-500">
+              4.8:1 · named condition
+            </p>
+          </div>
+          <div
+            class="rounded border-s-4 border-rule bg-paper-raised p-4"
+            style="border-inline-start-color: var(--color-review)"
+          >
+            <p class="text-lg font-semibold" style="color: var(--color-review)">
+              Needs a person to look at this
+            </p>
+            <p class="mt-1 text-sm">
+              Not an error. The facts do not permit a determinate answer.
+            </p>
+            <p class="tabular mt-2 text-xs text-ink-500">
+              6.8:1 · considered, never failed
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ---------------------------------------------------------------- -->
+      <section class="mb-10">
+        <h2 class="mb-1 text-xl font-semibold text-ink-900">
+          Ink, ground, boundary
+        </h2>
+        <p class="mb-4 max-w-2xl text-sm text-ink-500">
+          Two boundary weights, and the difference is not decoration.
+          <strong>Rule</strong> separates rows and carries no meaning if unseen.
+          <strong>Edge</strong> is a boundary a person must be able to
+          <em>find</em> — the outline of a field they have to type into. WCAG
+          1.4.11 asks 3:1 for that; the colour this replaced managed 1.26:1 and
+          was on the rent input.
+        </p>
+        <div
+          id="swatches"
+          class="grid gap-2 sm:grid-cols-2 lg:grid-cols-3"
+        ></div>
+      </section>
+
+      <!-- ---------------------------------------------------------------- -->
+      <section class="mb-10">
+        <h2 class="mb-1 text-xl font-semibold text-ink-900">The scale</h2>
+        <p class="mb-4 max-w-2xl text-sm text-ink-500">
+          One step larger than a typical web scale, with loose leading. The
+          audience is a competent adult reading in their second or third
+          language, on a phone, and often in sunlight — tight leading makes the
+          eye lose its place on a page people read carefully because money
+          depends on it.
+        </p>
+        <div class="space-y-2 rounded border border-rule bg-paper-raised p-4">
+          <p class="text-3xl font-semibold text-ink-900">
+            Answer first — 2.25rem
+          </p>
+          <p class="text-2xl font-semibold text-ink-900">
+            The outcome — 1.875rem
+          </p>
+          <p class="text-xl font-semibold text-ink-900">Section — 1.5rem</p>
+          <p class="text-lg">An amount you type — 1.25rem</p>
+          <p class="text-base">Body, at 17px rather than 16 — 1.0625rem</p>
+          <p class="text-sm text-ink-500">Secondary — 0.9375rem</p>
+          <p class="text-xs text-ink-500">
+            Provenance and signatures — 0.8125rem
+          </p>
+        </div>
+      </section>
+
+      <!-- ---------------------------------------------------------------- -->
+      <section>
+        <h2 class="mb-1 text-xl font-semibold text-ink-900">
+          Fields and targets
+        </h2>
+        <p class="mb-4 max-w-2xl text-sm text-ink-500">
+          44&nbsp;px minimum on anything tappable. Digits are tabular so a
+          column of rents lines up — comparing them is the entire task. Tab into
+          these to see the focus ring, which is 6.8:1 on both grounds and is
+          never removed.
+        </p>
+        <div
+          class="max-w-sm space-y-3 rounded border border-rule bg-paper-raised p-4"
+        >
+          <label class="block">
+            <span class="text-sm font-medium text-ink-900"
+              >What you pay now, per year</span
+            >
+            <input
+              type="text"
+              inputmode="numeric"
+              value="80,000"
+              class="tabular mt-1 w-full rounded border border-edge bg-paper-raised px-3 py-2 text-lg"
+            />
+          </label>
+          <button
+            type="button"
+            class="w-full rounded bg-ink-900 px-4 py-3 text-base font-semibold text-white"
+          >
+            Check this increase
+          </button>
+          <button
+            type="button"
+            class="w-full rounded border border-edge px-4 py-3 text-base font-medium text-ink-700"
+          >
+            Check another increase
+          </button>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

@@ -93,6 +93,13 @@ class Condition(StrEnum):
     # holds; whether the figure applies to this property is unverified.
     MARKET_AVERAGE_NOT_DERIVED = "market_average_not_derived"
 
+    # The figure is ours and deep enough to quote, but the release it came from
+    # is no longer new. Rents move: a cell drifts 4.3% at six months and 6.1% at
+    # twelve, against rule bands five percentage points wide. Disclosed rather
+    # than refused, because a figure from March is still worth having in
+    # September as long as the person is told it is from March.
+    MARKET_DATA_AGEING = "market_data_ageing"
+
     # We derived it, from fewer comparable contracts than we would like.
     THIN_COMPARABLE_DATA = "thin_comparable_data"
 
@@ -141,6 +148,14 @@ class MarketEvidence(BaseModel):
     # exists to prevent.
     contract_count: int | None = Field(default=None, ge=0)
     snapshot_id: str = Field(min_length=1)
+
+    #: How old the newest contract behind this figure is. `None` when the figure
+    #: was supplied to us: we cannot vouch for the recency of a number we did not
+    #: derive, and saying nothing is better than implying we checked.
+    #:
+    #: Depth and recency are both properties of the evidence, so they belong on
+    #: the same object. Grading reads both.
+    age_days: int | None = Field(default=None, ge=0)
 
 
 class EvaluationRecord(BaseModel):
@@ -378,6 +393,19 @@ class Evaluator:
             # is no figure held anywhere that a later step could decide to speak.
             verdict, computed, confidence, conditions = None, {}, None, []
         else:
+            # The rule is about to run, so every input it declares must now be
+            # present. Tolerating an absent derived input above is safe only
+            # because this closes behind it: without this, a grading bug would
+            # reach the rule logic with a missing figure.
+            absent = sorted(
+                name for name, spec in rule.inputs.items() if spec.required and name not in values
+            )
+            if absent:
+                raise MissingInputError(
+                    f"rule '{rule.id}' graded as answerable but {absent} is not present. "
+                    f"A derived input may be absent only when the outcome is "
+                    f"HUMAN_REVIEW_REQUIRED."
+                )
             verdict, computed = _DISPATCH[rule.logic](rule, values)
 
         return EvaluationRecord(
@@ -409,7 +437,12 @@ class Evaluator:
         values: dict[str, Any] = {}
         for name, spec in rule.inputs.items():
             if name not in inputs:
-                if spec.required:
+                # A *derived* input is one we supply, not the caller. Our failing
+                # to supply it is not a caller error - it is precisely the G5
+                # refusal, and grading below turns it into HUMAN_REVIEW_REQUIRED.
+                # Raising here instead would make "we have too little market data"
+                # arrive as a 422 blaming the caller for our own gap.
+                if spec.required and not spec.derived:
                     raise MissingInputError(
                         f"rule '{rule.id}' requires '{name}' and it was not supplied"
                     )
@@ -456,10 +489,25 @@ class Evaluator:
 
         if market.contract_count < floor:
             return OutcomeState.HUMAN_REVIEW_REQUIRED, None, []
+
+        # Two independent properties of the same evidence, and either can make an
+        # answer conditional without making it unusable. Depth is how many
+        # contracts stand behind the figure; recency is how long ago they were
+        # signed. They are accumulated rather than ranked, because a thin *and*
+        # ageing comparable owes the listener both facts.
+        conditions: list[Condition] = []
+        confidence = 1.0
+
         if market.contract_count < full:
-            return (
-                OutcomeState.CLEAR_WITH_CONDITIONS,
-                round(market.contract_count / full, 4),
-                [Condition.THIN_COMPARABLE_DATA],
-            )
+            conditions.append(Condition.THIN_COMPARABLE_DATA)
+            confidence = round(market.contract_count / full, 4)
+
+        if (
+            market.age_days is not None
+            and market.age_days > self._settings.market_snapshot_fresh_days
+        ):
+            conditions.append(Condition.MARKET_DATA_AGEING)
+
+        if conditions:
+            return OutcomeState.CLEAR_WITH_CONDITIONS, confidence, conditions
         return OutcomeState.CLEAR, 1.0, []

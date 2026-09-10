@@ -1046,7 +1046,22 @@ computation, cited clause and `review_status`.
 - [x] **Confirm it is readable on a phone** — viewport declared, 44px tap
       targets, no fixed pixel widths, and the 71-character signature broken so it
       cannot widen the page. Enforced by `phone-safety.test.ts`, not remembered
-- [x] **Run, confirm pass** — 234 backend, 50 frontend
+- [x] **Fix two silent failures found by running it** — `/evaluate` missing from
+      the dev proxy, and every colour class emitting no CSS under Tailwind v4.
+      Both now have tests; every suite had passed while the product was broken
+      (D-058)
+- [x] **Fix the language switch** — it offered three languages and delivered
+      one. Arabic differed from English in 1 of 57 strings, Malayalam in
+      **zero**, so the button changed nothing on screen. First fix disclosed the
+      gap (D-059); **superseded** — a caption on a broken control is still a
+      broken control. The switcher now offers only what the interface can render
+      and disappears at one language, derived from `_TRANSLATION_STATUS` so a
+      finished locale makes its own button appear (D-065). Arabic and Malayalam
+      stay in `LANGUAGES`, the templates and the voice scripts: they are the
+      product, and the blocker is that the **official Arabic** of Decree 43/2013
+      exists and must be sourced, not drafted. The choice is also persisted —
+      every reload silently reverted to English
+- [x] **Run, confirm pass** — 331 backend, 70 frontend
 
 **DoD:** A stranger can reach a correct verdict without instructions. ✅ Verified
 end to end as one process: `GET /` serves the app, `POST /evaluate` answers from
@@ -1060,49 +1075,22 @@ D-013 and is gated on the glossary, not on code.
 
 ## T1.9 — Deploy ⚠ THIS IS BOX N
 
-**Files:** `Dockerfile`, `.dockerignore`, `.gitattributes`, `LICENSE`,
-`fly.toml`, `render.yaml`, `backend/src/bayyina/api/security.py`,
-`backend/tests/test_deployment_config.py`, `.github/workflows/ci.yml`
+**Files:** `Dockerfile`, `.dockerignore`, `docs/CANVAS.md`
 
-### Engineering — done
-
-- [x] **Multi-stage Dockerfile** — Node builds the interface, Python runs it.
-      Non-root (uid 10001), no bytecode, unbuffered logs
-- [x] **Verify the corpus while building the image.** G7 as early as it can go:
-      an image carrying an unreviewed rule cannot exist. CI proves it by
-      tampering with a rule and asserting the build refuses
-- [x] **TLS at the edge, never in-process** — uvicorn runs with
-      `--proxy-headers --forwarded-allow-ips '*'`
-- [x] **Security headers** — strict CSP with no `unsafe-inline`, verified against
-      the built page; `X-Frame-Options: DENY`; HSTS **only over TLS** (D-055)
-- [x] **Normalise line endings** — `.gitattributes`, 29 files converted. CRLF
-      breaks every `run:` block on a Linux runner (D-056)
-- [x] **Add a LICENCE** — a public repo without one is all-rights-reserved, and
-      it records what the licence does not cover: the DLD dataset and the
-      legislation quoted in each rule
-- [x] **Fix the first container run** — the image baked in
-      `BAYYINA_ENV=production` with no base URL, so it crash-looped. The
-      guardrail was right; the image was wrong (D-057)
-- [x] **Test what only fails at deploy time** — image environment, non-root,
-      build-time corpus verification, proxy headers, build context, and both
-      platform configs
-- [x] **CI builds the image and smoke-tests the container**, with diagnostics
-      printed unfolded so a boot failure is readable
-- [x] **Run, confirm pass** — 252 backend, 50 frontend
-
-### Operator — yours, in order
-
-- [x] Initialise the repository and push it
-- [ ] Confirm CI is green, including the `image` job
-- [ ] Create the host account and run `fly launch --no-deploy`
-- [ ] **`fly secrets set BAYYINA_BASE_URL=https://<app>.fly.dev` — before the
-      first deploy.** The app refuses to boot in production without it
-- [ ] `fly deploy`
+- [ ] Write the Dockerfile — Python 3.11-slim, install the backend package, copy
+      `backend/rules/` and the built `frontend/dist/`, run uvicorn
+- [ ] **TLS.** Terminate at the platform edge (Railway/Render/Fly all do), never in
+      this process. Run uvicorn with `--proxy-headers --forwarded-allow-ips='*'`
+      so the app sees the original scheme instead of assuming http
+- [ ] **Set `BAYYINA_ENV=production` and an https `BAYYINA_BASE_URL`.** Settings
+      refuses to boot otherwise (D-045), so this is checked rather than remembered
+- [ ] Add HSTS and the standard security headers, and verify the certificate chain
+      from outside the platform dashboard
+- [ ] **Confirm HTTPS before Phase 3:** Twilio and ElevenLabs both require https
+      webhook endpoints, so this is a hard prerequisite, not a polish item
+- [ ] Deploy to a public host (Railway, Render or Fly.io free tier)
 - [ ] **Verify `/healthz` reports `corpus_signed: true` in production**
-- [ ] Run the tamper demo against the deployed URL once, so Box N is a claim you
-      have watched work
-- [ ] Check the certificate chain from outside the platform dashboard
-- [ ] Record the live URL in `docs/CANVAS.md` boxes N and Q
+- [ ] Record the live URL in `docs/CANVAS.md` box N
 
 **DoD:** A public URL returns a correct verdict. **Box N is no longer blocked and
 Stage 1 cannot score zero on it.** This is the single most important gate in the
@@ -1121,62 +1109,167 @@ an unstyled template undermines the claim before a word is read.** One deliberat
 visual pass now, reused by the checker, the provenance pages, the officer
 dashboard and the PDF.
 
-- [ ] Define tokens: type scale, spacing, colour with **WCAG AA contrast
+- [x] Define tokens: type scale, spacing, colour with **WCAG AA contrast
       verified**, and a state palette where `HUMAN_REVIEW_REQUIRED` reads as
       *considered*, not as *error*
-- [ ] Choose and bundle the type family — Noto Sans, Noto Sans Arabic, Noto Sans
+- [x] Choose and bundle the type family — Noto Sans, Noto Sans Arabic, Noto Sans
       Malayalam, so web and PDF render identically
-- [ ] Build the RTL foundation: `dir="rtl"` mirrors layout, not just text. Use
+- [x] Build the RTL foundation: `dir="rtl"` mirrors layout, not just text. Use
       logical properties (`margin-inline-start`, not `margin-left`)
-- [ ] Build at 360 px first, then widen
-- [ ] Record the visual direction in `docs/DECISIONS.md`
+- [x] Build at 360 px first, then widen
+- [x] Record the visual direction in `docs/DECISIONS.md` — D-080 to D-083
 
-**DoD:** One page rendered in all three languages, side by side, at 360 px. Arabic
-mirrors correctly. Contrast passes AA. **Screenshot all three — this is also
-canvas and README material.**
+**Two accessibility defects found by measuring rather than asserting:**
+
+- [x] **`ink-300` at 2.46:1**, under AA, used by nothing. Deleted — a token that
+      exists will be reached for
+- [x] **`rule` at 1.26:1, on the rent input's border.** The one field a person
+      has to find and type into had a boundary they could not see. Split into
+      `rule` (decorative hairline) and **`edge` at 3.6:1** (any boundary that
+      must be findable — WCAG 1.4.11). Every ratio is now recomputed from
+      `index.css` on each run, not asserted in a comment (D-080)
+- [x] **A test fixture was adding a rule to the production stylesheet.** Tailwind
+      v4 scans every project file, so the test documenting the banned v3 syntax
+      taught Tailwind to emit it — invalid CSS, shipped, from the test that
+      exists to ban it (D-083)
+
+**Typography:** Noto across all three scripts, **175 KB bundled, no third-party
+request** — the CSP forbids one and the PDF pipeline needs the same faces on
+disk. 400 and 600 only. Body at 17px with loose leading, because the audience
+reads in a second or third language on a phone.
+
+**DoD:** ⚠️ **Partly met, and the gap is stated.** `specimen.html` is a second
+Vite entry built from the product's own `index.css`, showing three 360 px panes,
+the outcome states, the scale and the swatches with live contrast ratios. Its
+Arabic pane is genuinely `dir="rtl"`, so the mirroring is real.
+
+It is **not** "one page in all three languages": Arabic and Malayalam are not
+translated (D-065), so those panes carry typographic text that says so. What is
+demonstrated is that the three script stacks render at the same sizes with the
+same rhythm. The translated page is T2.7 plus a translator.
+
+**Screenshots are yours to take** — open `http://localhost:5173/specimen.html`
+(or `/specimen.html` on the deployed container, which ships it). No headless
+browser is installed and adding one for three screenshots is not worth 300 MB.
 
 ---
 
-## T2.1 — Ingest with data-quality validation
+## T2.1 — Ingest with data-quality validation ✅
 
-**Files:** `src/bayyina/market/ingest.py`
-**Test:** `tests/market/test_ingest.py`
+**Files:** `src/bayyina/market/{ingest,normalise,errors}.py`, `scripts/ingest_market.py`
+**Test:** `tests/market/{test_ingest,test_normalise,test_release}.py` — **71 tests**
 
 Ingestion is not `read_csv`. **Bad data produces confident wrong verdicts**, which
 is the worst failure this product can have.
 
-**The rules below are measured from the real file (2026-09-09), not guessed.**
-Source: `rent_contracts_20260226.parquet`, 9,798,685 rows, sha256 `72d347b2…`.
+**The rules below were measured from the real file (2026-09-09).**
+Source: `rent_contracts_20260226.parquet`, 9,798,685 rows, sha256 `72d347b2…`
+— confirmed by the pipeline, not assumed.
 
-- [ ] **Exclude non-tenancy "residential" stock.** `property_usage_en =
-      'Residential'` includes labour camps and staff accommodation, which are
-      whole-block contracts, not tenancies. Measured medians: `Room in labor Camp`
-      **AED 455,009**; `Staff Accommodatoion` *(misspelt in source)* **AED
-      2,620,000**. Left in, a caller in Jabal Ali gets a market average in the
-      hundreds of thousands. **Exclude by sub-type, and test that Jabal Ali
-      Industrial First returns a plausible flat median**
-- [ ] **Normalise area names.** `Al Barsha South Third` and `Al Barshaa South
-      Third` are distinct codes, and **13,127 contracts sit under the misspelt
-      one**. This is most of a neighbourhood, not a cosmetic issue
-- [ ] **Normalise sub-types.** `1bed room+Hall` vs `2 bed rooms+hall` differ in
-      spacing and capitalisation; `2 bed rooms+hall+Maids Room` must map to 2-bed.
-      **This field is where bedrooms live — there is no bedrooms column**
-- [ ] **Reject implausible rents.** Measured on residential: 35 rows ≤ 0, 2,449
-      below AED 1,000, 45,389 above AED 10,000,000, max **AED 3.3 billion**.
-      Absolute bounds of 1,000–10,000,000 reject ~0.69%
-- [ ] **Add per-cell IQR trimming.** Absolute bounds are not enough: Al Barsha
-      First 2-beds still span AED 9,000 to 6,000,000 after filtering. Trim outside
-      1.5×IQR within each `(area, type, sub_type)` cell
-- [ ] Reject: null or non-positive rent, end date before start, missing area,
-      duplicate `contract_id`
-- [ ] Implement ingest → DuckDB with a `snapshots` row recording `snapshot_id`,
-      `computed_at`, `source`, `source_sha256`, `row_count`, `rejected_count`
-- [ ] Record final counts in `docs/CANVAS.md` box D
+- [x] **Exclude non-tenancy "residential" stock.** Worse than estimated:
+      `Room in labor Camp` is **978,610 contracts at a median of AED 504,000**
+      (the plan said 455,009), `Labor Camp` 134,334 at 816,000,
+      `Staff Accommodatoion` *(misspelt in source)* 8,671 at 2,274,500. Scope is
+      an **allowlist** and the **intersection** of property type and sub-type,
+      because neither is sufficient: 'Room in labor Camp' appears 3,234 times
+      under `Flat`, and `Studio` 6,552 times under `Labor Camps` (D-063)
+- [x] **⚠ Exclude whole-block contracts — the plan did not have this rule and it
+      matters most.** `annual_amount` is the total for every property on the
+      contract, not one home's rent: 2-bed medians run AED 66,000 at one property
+      and **AED 596,904 at ten**. **1,375,195 residential rows** carry it. Left
+      in they inflate every median *and* count one contract once per property
+      (D-060)
+- [x] **Normalise area names — the plan had this inverted.** 'Al Barsha South
+      Third' does not exist in this release; Barsha's eight sub-areas are spelled
+      inconsistently across **genuinely different neighbourhoods**, and merging
+      them would corrupt eight medians at once. The key case-folds and collapses
+      doubled letters so a resident's spelling reaches DLD's, and **all 213 area
+      names are asserted to merge exactly one pair** — 'AL QUSAIS' (148,665) with
+      'Al Qusais' (11), the same place under two codes (D-060)
+- [x] **Normalise sub-types.** There is no bedrooms column; the count lives in
+      free text. `1bed room+Hall` → 1, `2 bed rooms+hall+Maids Room` → 2 (a
+      maid's room is not a bedroom), `Studio` → **0, which is a real count and
+      not a missing value**
+- [x] **Reject implausible rents.** Absolute bounds 1,000–10,000,000. Measured:
+      32 non-positive, 915 below floor, 103 above ceiling
+- [x] **Per-cell IQR trimming**, per `(area, type, bedrooms, **year**)`. The year
+      is not optional: Al Barsha First 2-beds ran 90,000 in 2017, 65,000 in 2021
+      and 88,000 in 2026, so a fence across the whole corpus describes no year in
+      it. Cells under 8 contracts are left alone (D-062). **198,625 trimmed**
+- [x] **Reject** null or non-positive rent, end date not after start, missing
+      area. **`contract_id` is not a key** — 8,178,976 distinct ids over
+      9,798,685 rows; rejecting duplicates as the plan said would have discarded
+      1.62M real tenancies. De-duplication is by `(contract_id, line_number)`
+      (D-060)
+- [x] Ingest → DuckDB with `snapshots`, `rejections`, `areas`, `contracts`;
+      snapshot records `snapshot_id`, `computed_at`, `source`, `source_sha256`,
+      `row_count`, `rejected_count` and every stage count
+- [x] **Guard the allowlist.** An unrecognised property type holding ≥1% of a
+      release stops the ingest — otherwise a `Flat` → `Apartment` rename would
+      empty the table silently and look fine (D-063)
+- [x] Record final counts in `docs/CANVAS.md` box D
 
-**DoD:** Rejection rate recorded and under 5% (expected ~0.7% on absolute bounds
-alone). **A comparable query for an industrial area returns a plausible flat
-median, not a labour-camp figure** — assert this, it is the failure that would
-hurt the exact residents this is built for.
+**Measured result** — `python scripts/ingest_market.py data/raw/rent_contracts_20260226.parquet`, 27 s:
+
+| Stage | Rows | |
+|---|---:|---|
+| Read | 9,798,685 | |
+| Excluded | 4,296,572 | not a single-unit residential tenancy |
+| In scope | 5,502,113 | |
+| **Rejected** | **1,050** | **0.019%** of in-scope, against a 5% budget |
+| Trimmed | 198,625 | outside 1.5×IQR within their cell-year |
+| **Stored** | **5,302,438** | across **184 areas** |
+
+**DoD:** ✅ Rejection rate **0.019%**, well under 5%, and measured against
+in-scope rows rather than the file — 56% of the release is out of scope, so the
+wrong denominator would have made the number meaningless (D-061).
+
+✅ **The industrial-area check, which is the one that would have hurt real
+residents:** raw `Residential` in Jabal Ali Industrial has a median of **AED
+829,720**. After scope rules: **AED 32,000**. A caller asking whether their
+32,000 rent may rise to 38,000 would have been told the market rate was three
+quarters of a million — with a correct citation and signed arithmetic attached.
+Asserted in `test_release.py`, not merely observed.
+
+**Also found here:**
+
+- **Five scope tests passed while proving nothing.** Deleting a scope rule let
+  the hazard row into scope, where the *outlier fence* removed it instead, so
+  "not in the table" held either way. The tests now assert `in_scope_rows`, which
+  only scope can satisfy. All seven rules re-verified by deletion (D-064)
+- **Box D's headline figure counted rows, not homes.** 743,740 residential
+  registrations in twelve months, of which **567,652** are single-unit homes;
+  the rest are 124,399 labour-camp and 146,489 whole-block contracts. Both
+  numbers are true and they answer different questions
+- **The release is 6.5 months old** (contracts to 2026-02-26, today 2026-09-09).
+  T2.2's rolling twelve months must run to the **snapshot date**, not to today,
+  or it silently halves its own evidence — 271,538 rows instead of 567,652
+
+**Hardening pass (2026-09-10), after the audit:**
+
+- [x] **The write is one transaction.** Contracts, areas, rejections and the
+      snapshot row were written in sequence, so a crash between them left
+      **comparable figures with no source, no digest and no date** — invisible,
+      because every query still returns plausible rows. Two invariants now
+      asserted: no orphan contract, and a mid-store failure leaves all four
+      tables empty (D-066)
+- [x] **The digest is validated as a digest**, `^sha256:[0-9a-f]{64}$` rather
+      than `min_length=64`, which accepted a truncated value in the one field
+      that carries a snapshot's traceability
+- [x] **Cleared three stale deferral markers** naming T2.1 for work that is
+      actually T2.3 — `market_snapshot_max_age_days`, the `/healthz` deferral,
+      and the README. Two tests now hold the line: a `NOT YET CONSUMED` marker
+      may not name a completed task, and may not name a task the plan does not
+      contain (D-067)
+- [x] **`ARCHITECTURE.md` named a database the code never writes**
+      (`rent_contracts.duckdb` against `market.duckdb`). Nothing caught it,
+      because a filename is neither a module nor a script. Now guarded
+- [x] **Documented the pipeline** — README build command with the four-stage
+      table, ARCHITECTURE §8 with the real schema and the scope reasoning
+
+**Not done here, deliberately:** aggregation and the 20 ms lookup are T2.2; the
+G5 thresholds that decide whether a thin cell may be quoted at all, and the
+staleness check that finally consumes `market_snapshot_max_age_days`, are T2.3.
 
 ---
 
@@ -1188,15 +1281,37 @@ hurt the exact residents this is built for.
 **A `GROUP BY` over 9.8M rows at call time cannot meet the 150 ms budget.**
 Materialise medians at build time into a small indexed table.
 
-- [ ] Write a test asserting the aggregate table has one row per
-      `(area, property_type, bedrooms)` with `median_annual_rent`,
+- [x] Write a test asserting the aggregate table has one row per
+      `(area, property_kind, bedrooms)` with `median_annual_rent`,
       `contract_count`, `snapshot_id`
-- [ ] **Write a performance test asserting lookup completes in under 20 ms**
-- [ ] Implement aggregation over a rolling 12-month window
-- [ ] Bake the aggregate into the Docker image at build time
+- [x] **Write a performance test asserting lookup completes in under 20 ms**
+- [x] Implement aggregation over a rolling 12-month window ending at the
+      snapshot date
+- [x] Bake the aggregate into the Docker image at build time
 
-**DoD:** A measured lookup under 20 ms on the deployed instance. If it is not, the
-voice product cannot meet its latency budget and this must be fixed now, not later.
+**Measured:** window 2025-03-01 .. 2026-03-01, **555,607 contracts**, 1,324 cells,
+**841 quotable** at or above 10 contracts. **p95 lookup 7 µs** — 2,778× inside the
+20 ms budget, because the table is read once at boot and held in memory.
+
+**Two things the plan did not anticipate, both found by building it:**
+
+- [x] **The window must end at the data, not at today.** A rolling twelve months
+      to `now()` slides off the end of a release: six months after publication it
+      would cover 267,252 contracts instead of 555,607 and keep shrinking, with
+      no error and no signal. Anchoring on `max(contract_start_date)` is worse —
+      one contract in the file starts **2204-10-04**, and a window ending there
+      holds exactly one row, silently emptying the entire table. The snapshot now
+      carries a `data_horizon` (99.9th percentile), dates beyond it are rejected,
+      and both window ends are stored so a past answer reproduces (D-069)
+- [x] **The build database is 359 MB; the request path reads 1,324 rows.** Baking
+      it whole would ship 5.3M individual tenancy records in a public image to
+      serve a few hundred numbers. `export_for_serving` writes a **1.3 MB**
+      database — comparables, areas and provenance only, **271× smaller** — and
+      that is what the image carries. Contracts stay in the build database, where
+      re-aggregating and auditing a figure back to its rows are still possible
+
+**DoD:** ✅ A measured lookup far under 20 ms. Deferred to T1.9: the same
+measurement on the deployed instance.
 
 ---
 
@@ -1205,16 +1320,109 @@ voice product cannot meet its latency budget and this must be fixed now, not lat
 **Files:** `src/bayyina/market/comparables.py`, route in `routes_evaluate.py`
 **Test:** `tests/market/test_comparables.py`
 
-- [ ] Write tests for the three bands: ≥30 → `ok` full confidence; 10–29 → `ok`
+- [x] Write tests for the three bands: ≥30 → `ok` full confidence; 10–29 → `ok`
       reduced confidence; <10 → `insufficient_data` with
-      **`median_annual_rent is None`**
-- [ ] Write a test asserting a stale snapshot (older than
+      **`median_annual_rent is None`**. Boundaries pinned at 9/10/29/30/31
+- [x] Write a test asserting a stale snapshot (older than
       `market_snapshot_max_age_days`) returns `stale` and no figure
-- [ ] Implement; wire into `/evaluate` so a thin comparable forces
+- [x] Implement; wire into `/evaluate` so a thin comparable forces
       `HUMAN_REVIEW_REQUIRED`
+- [x] **`GET /comparables`** — the lookup as its own route, for the voice agent
+      and the provenance page. **Always 200**: `insufficient_data`, `stale` and
+      `unknown_area` are each a thing the agent has to say aloud, and returning
+      them as 4xx would teach every client to treat our honesty as a fault
+- [x] **`POST /evaluate` accepts a `dwelling`** — area, kind, bedrooms — and
+      derives the figure itself. **This is the point of the task**: a resident no
+      longer types their own market average, so the answer stops being
+      `CLEAR_WITH_CONDITIONS / market_average_not_derived` and becomes `CLEAR`.
+      Supplying both a figure and a dwelling is refused, because with both nobody
+      could tell which number the answer used
+- [x] **A fourth status the plan did not name: `unknown_area`.** "Not enough
+      contracts in your area" and "which area?" are different problems and only
+      one of them the caller can fix
 
-**DoD:** No code path returns a number below the threshold. Assert it, do not
-assume it.
+**Three findings while wiring it:**
+
+- [x] **A missing derived input was blaming the caller.** `_coerce_inputs` raised
+      `MissingInputError` for any absent required input, derived ones included —
+      so "we have too little market data" would have arrived as a 422 about a
+      field the resident was never asked for. A derived input may now be absent;
+      grading turns that into HUMAN_REVIEW_REQUIRED, and a second check refuses
+      to run the rule if grading ever says answerable with a hole (D-073)
+- [x] **Market data is optional at boot**, and `/healthz` names its absence with
+      two separate checks — `market_data_loaded` and `market_data_fresh`. A
+      loaded-but-stale snapshot answers every lookup with `stale`, which reads as
+      a broken service unless health says why. **This retires the last
+      `not_yet_checked` entry**, deferred there since T1.7 (D-074)
+- [x] **G5 is a property of the type here.** `Comparable` cannot be constructed
+      holding a figure unless its status is `ok`, so every refusal path is
+      structurally unable to carry a number (D-071)
+
+**DoD:** ✅ No code path returns a number below the threshold — asserted at the
+boundaries, at the type, and by breaking each guard and watching a test go red.
+
+**Production audit of T2.1-T2.3 (2026-09-10).** Two real defects, both in things
+that already worked and passed every test:
+
+- [x] **The disclosed age was wrong for 11.7% of cells.** D-076 built two
+      freshness thresholds on `age_days`, and `age_days` was the *snapshot's*
+      age. Of 841 quotable cells, 98 trail the release by more than a month and
+      one — 72 contracts in Al Rowaiyah First — is **418 days old inside a
+      release we call 193 days old**, past our own refusal threshold and quoted
+      with a "193 days" label. Each cell now records its own newest contract, and
+      that decides both the disclosure and the refusal. Verified: that cell now
+      returns `stale` with no figure (D-078)
+- [x] **`unknown_area` was a dead end.** We told a caller we could not resolve
+      their area and offered nothing next, which on a phone call is where people
+      hang up. `GET /areas` returns all 184 by display name, with a test that
+      every listed name actually resolves (D-079)
+- [x] **Punctuation was an outcome rather than a bad request.** `"   "` and
+      `"!!!"` passed `min_length=1`, normalised to the empty key and came back
+      as `unknown_area` — which implies we looked. Now a 422 pointing at
+      `/areas`, on both routes
+- [x] `aggregate()` validates its window up front instead of running the SQL and
+      letting the model object afterwards; the build now reports
+      `oldest_quotable_contract`, so it says at build time whether it has
+      produced figures already too old to quote
+- [x] Checked and found **correct**, so left alone: money crosses the wire as a
+      string (`"85000.00"`), the store is immutable after construction and needs
+      no lock, and the 503 for missing market data leaks no filesystem path
+
+**Freshness, resolved (2026-09-10).** The open question here was whether to
+refuse everything or raise the threshold. Neither: staleness now has **two**
+thresholds and a middle band.
+
+- [x] **Measured the cost of staleness** rather than guessing it. Median cell
+      drift: 3.4% at three months, 4.3% at six, 6.1% at twelve. **The rent-cap
+      bands are five percentage points wide**, so past a year a stale median can
+      flip a verdict; under four months it cannot
+- [x] `market_snapshot_fresh_days` (120) — under this, quote plainly.
+      `market_snapshot_max_age_days` (365) — past this, quote nothing. Between
+      them the answer carries `MARKET_DATA_AGEING` naming the date it rests on.
+      The old 120 had **no recorded rationale anywhere**; it survives as the
+      disclosure point because the measurement supports it (D-076)
+- [x] Depth and recency **accumulate rather than rank** — a thin *and* ageing
+      comparable owes the listener both facts
+- [x] `/healthz` reports `market_data_usable`, not `market_data_fresh`. Freshness
+      as a pass/fail check would have reported `degraded` for eight months of
+      every publication cycle
+- [x] **Verified on the real release**: 193 days old, `CLEAR_WITH_CONDITIONS`,
+      `not_permitted`, AED 85,000 from 5,019 registered contracts, condition
+      `market_data_ageing`. The product answers, and says what it rests on
+
+> **Still operator-owned:** `www.dubaipulse.gov.ae` refuses connections from two
+> independent networks. `dubailand.gov.ae` is live and its Real Estate Data
+> portal bulk-exports the same registry — a Transactions pull on 2026-09-10 ran
+> to that day, 154,262 rows, uncapped. **Download the Rents tab**, dates only,
+> every other filter blank, then `python scripts/inspect_release.py <file>`.
+>
+> It needs an adapter: the portal has no contract identifier (a surrogate hash
+> of the identifying fields, which undercounts rather than over-), different
+> column names, and current-year data only, so it supplements the Pulse history
+> rather than replacing it (D-077).
+>
+> **Local `.env` pins `MARKET_SNAPSHOT_MAX_AGE_DAYS=120`** and overrides the new
+> default. Set it to 365 and add `MARKET_SNAPSHOT_FRESH_DAYS=120`.
 
 ---
 
@@ -1260,8 +1468,30 @@ def test_pack_renders_in_every_supported_language(rent_eval):
       in this module**
 - [ ] Add a test asserting the `evidence` package imports no LLM client
 
-**DoD:** `grep -r "openai\|anthropic\|elevenlabs" src/bayyina/evidence/` returns
-nothing. G10 is verified by inspection, not by trust.
+- [x] Implement `build_pack` accepting **only** `EvaluationRecord` instances.
+      Every shape a composed answer plausibly arrives in is tested — a string, a
+      dict shaped like a record, a list of them — because **pydantic would have
+      coerced a mapping into an `EvaluationRecord`**, and a verdict assembled by
+      hand or by a model would then have been indistinguishable from a computed
+      one
+- [x] Add a test asserting the `evidence` package imports no LLM client
+- [x] **Vocabulary moved out of the templates** into `wording.py`. The first pack
+      printed `Gap pct: 0.058824` and `Current annual rent: 80000` — both banned
+      by GLOSSARY sections 1 and 4. A field with no wording now raises rather
+      than falling back to its own name (D-085)
+- [x] **Language is refused, never faked.** `ar` and `ml` raise rather than
+      producing an English document, and support is derived from which templates
+      exist. Each missing language carries a note saying what is needed and why
+      it is blocked (D-084)
+- [x] **`pip install .` would have shipped no templates.** setuptools copies
+      `.py` and nothing else; the container would have booted clean and failed on
+      the first pack. `package-data` declared, swept by a test, verified against a
+      real install, and CI now renders a pack **inside the built image** (D-086)
+
+**DoD:** ✅ `grep -r "openai\|anthropic\|elevenlabs" src/bayyina/evidence/`
+returns nothing, and the same sweep runs as a test across every source and
+template in the package. G10 is verified by inspection *and* by the type at the
+door.
 
 ---
 

@@ -21,6 +21,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from bayyina.audit import AuditLog
+from bayyina.market.comparables import ComparableStore, MarketDataUnavailableError
 from bayyina.observability import add_response_timing, configure_logging
 from bayyina.registry.evaluator import EvaluationError, Evaluator, UnknownRuleError
 from bayyina.registry.loader import load_rules
@@ -82,6 +83,7 @@ def create_app(
     rules_dir: Path | str | None = None,
     audit_path: Path | str | None = None,
     static_dir: Path | str | None = None,
+    market_db: Path | str | None = None,
     settings: Settings | None = None,
 ) -> FastAPI:
     """Build the application, or refuse to.
@@ -113,6 +115,28 @@ def create_app(
         audit_path if audit_path is not None else Path(settings.data_dir) / "audit.jsonl"
     )
     app.state.audit.path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Market data is optional at boot, and deliberately so. The rules engine, the
+    # notice rule and a caller-supplied market figure all work without it, and a
+    # service that refuses to start because one dataset is missing takes down
+    # three things that were fine. Its absence is reported by /healthz rather
+    # than hidden - a green check that lies is worse than none.
+    # `comparables.duckdb`, not `market.duckdb`. The build database carries 5.3M
+    # contract rows the request path never reads; the serving one is 1.3 MB.
+    market_path = (
+        market_db if market_db is not None else Path(settings.data_dir) / "comparables.duckdb"
+    )
+    try:
+        app.state.comparables = ComparableStore(market_path, settings=settings)
+        logger.info(
+            "comparables loaded: snapshot %s, %s .. %s",
+            app.state.comparables.snapshot_id,
+            app.state.comparables.window_start,
+            app.state.comparables.window_end,
+        )
+    except MarketDataUnavailableError as unavailable:
+        app.state.comparables = None
+        logger.warning("no market comparables: %s", unavailable)
 
     # Order matters. Middleware added later runs first, so timing wraps the
     # limiter: a 429 is still measured and still carries x-response-ms.
@@ -151,7 +175,18 @@ def __getattr__(name: str) -> FastAPI:
     that. And importing this module has no side effect, so a broken corpus fails
     the one process that asked for an app rather than every test collection that
     happened to import `create_app`.
+
+    **Built once.** The result is written into the module namespace, so every
+    later lookup finds it there and never reaches this function again (PEP 562).
+    Without that, uvicorn's two accesses built two complete applications: the
+    corpus was verified twice, the comparables database read twice, and **two
+    `AuditLog` objects existed with a lock each**. Only one was ever served, so
+    the chain was never actually at risk - but a second audit log holding a
+    second lock over the same file is precisely the shape of the concurrency bug
+    D-035 exists to prevent, and it should not be one refactor away.
     """
     if name == "app":
-        return create_app()
+        built = create_app()
+        globals()["app"] = built
+        return built
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

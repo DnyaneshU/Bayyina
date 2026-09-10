@@ -56,12 +56,23 @@ COPY backend/scripts/ ./scripts/
 
 COPY --from=frontend /build/dist/ ./static/
 
+# THE COMPARABLES. Built by `scripts/ingest_market.py` before the image is, and
+# copied as a directory rather than a file so that a build without one still
+# succeeds: market data is optional at boot by design (D-074), and the notice
+# rule and a caller-supplied figure both work without it. `/healthz` reports its
+# absence rather than the image hiding it.
+#
+# .dockerignore keeps the 359 MB build database and the raw release out. Only
+# `comparables.duckdb` comes, at 1.3 MB.
+COPY backend/data/ ./data/
+
 # Guardrail G7, moved as early as it can go. The same check runs in CI and again
 # at boot; here it means a bad corpus cannot even become an image.
 RUN python scripts/verify_corpus.py rules/
 
-# The audit log lives here. On a platform with an ephemeral filesystem this is
+# The audit log lives here too. On a platform with an ephemeral filesystem it is
 # wiped on redeploy — mount a volume at /app/data for anything but a demo.
+# `mkdir -p` leaves any comparables database copied above untouched.
 RUN mkdir -p /app/data
 
 # Non-root. The process reads signed rules and appends to an audit log; it has
