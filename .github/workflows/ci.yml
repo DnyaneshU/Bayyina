@@ -173,24 +173,42 @@ jobs:
           grep -q '"verdict":"not_permitted"' verdict.json || { echo "wrong verdict"; exit 1; }
           grep -q '"clause":"Article 1"' verdict.json      || { echo "citation missing"; exit 1; }
 
-          echo "--- market data is absent here, and the image says so ---"
-          # `comparables.duckdb` is gitignored, so a CI checkout has none. That is
-          # a supported state (D-074), and the point of this check is that the
-          # image degrades *honestly*: it names the missing dataset rather than
-          # reporting healthy, and everything not depending on it still works.
-          grep -q '"market_data_loaded":false' health.json || {
-            echo "expected the image to report market data as absent"; exit 1; }
-          grep -q '"status":"degraded"' health.json || {
-            echo "a missing dataset must degrade status, not pass silently"; exit 1; }
+          echo "--- the image ships market data, and serves from it ---"
+          # This asserted the *absent* case until D-102, because
+          # `comparables.duckdb` was gitignored and a CI checkout had none.
+          # It is committed now - 1.3 MB of aggregate medians - so the image the
+          # judge reaches answers from real registered contracts rather than
+          # degrading honestly. Both are supported states; only one is the
+          # product, and this is the only place that proves which one shipped.
+          grep -q '"market_data_loaded":true' health.json || {
+            echo "the image shipped without market data - it would serve degraded"; exit 1; }
+          grep -q '"market_data_usable":true' health.json || {
+            echo "market data loaded but is not usable - check its age"; exit 1; }
+          grep -q '"status":"ok"' health.json || {
+            echo "every check passes but status is not ok"; exit 1; }
           grep -q '"not_yet_checked":\[\]' health.json || {
             echo "nothing should still be deferred"; exit 1; }
 
-          echo "--- and asking for a derived figure says how to fix it ---"
-          code=$(curl -s -o comparables.json -w '%{http_code}'             'http://127.0.0.1:8000/comparables?area=Al%20Barsha%20First&kind=flat&bedrooms=2')
+          echo "--- a comparable comes back from the shipped aggregate ---"
+          curl -fsS 'http://127.0.0.1:8000/comparables?area=Al%20Barsha%20First&kind=flat&bedrooms=2' -o comparables.json
           cat comparables.json; echo
-          [ "$code" = "503" ] || { echo "expected 503, got $code"; exit 1; }
-          grep -q 'ingest_market' comparables.json || {
-            echo "the 503 does not say how to build the database"; exit 1; }
+          grep -q '"status":"ok"' comparables.json || {
+            echo "the shipped aggregate did not answer for a known area"; exit 1; }
+          grep -q '"median_annual_rent":"85000.00"' comparables.json || {
+            echo "the median changed - re-verify the snapshot before shipping"; exit 1; }
+
+          echo "--- and the whole journey, deriving the figure itself ---"
+          DERIVED='{"rule_id":"rent_increase.dubai.decree_43_2013",'
+          DERIVED=$DERIVED'"inputs":{"current_annual_rent":"80000","proposed_annual_rent":"96000"},'
+          DERIVED=$DERIVED'"input_sources":{"current_annual_rent":"caller_stated","proposed_annual_rent":"caller_stated"},'
+          DERIVED=$DERIVED'"dwelling":{"area":"Al Barsha First","kind":"flat","bedrooms":2}}'
+
+          curl -fsS -X POST http://127.0.0.1:8000/evaluate             -H 'Content-Type: application/json' -d "$DERIVED" -o derived.json
+          cat derived.json; echo
+          grep -q '"dld_open_rent_contracts_derived"' derived.json || {
+            echo "the figure was not recorded as ours (G9)"; exit 1; }
+          grep -q '"verdict":"not_permitted"' derived.json || {
+            echo "wrong verdict on the derived path"; exit 1; }
 
           echo "--- the evidence pack renders inside the image ---"
           # `pip install .` copies .py and nothing else unless told otherwise,
