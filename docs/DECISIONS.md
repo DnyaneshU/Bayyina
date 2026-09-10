@@ -1286,3 +1286,158 @@ non-Python file under `src/bayyina` and asserts a pattern covers it, so the next
 one added is caught the same way — verified against a real `pip install`, and CI
 now renders a pack inside the built image, which is the only place that proves
 the templates made the journey.
+
+### D-087 · Three green suites, three red CI jobs
+**2026-09-10** — Every job failed on a commit whose tests passed locally. Three
+unrelated causes, one shared property: **none of them could fail on a developer's
+machine.**
+
+*Backend.* Dependencies are open `>=`, so CI installs the newest of everything.
+It resolved Starlette 1.6, which stopped flattening included routers onto the
+application — `isinstance(route, APIRoute)` matched nothing. The application was
+fine; the *test* was reading a framework's private route table. It now reads
+`app.openapi()["paths"]`, the published contract. Worth recording that the test
+only failed at all because of its own guard, `assert served, "no API routes
+found"` — without that line an empty set would have satisfied every later
+assertion and reported success.
+
+*Frontend.* Six styling tests each ran `vite build` if `dist/` was missing, under
+Vitest's default 5 s timeout. Measured: **1 s here, 7 s on a single core**, which
+is what a CI runner is. The build is now one cached hook with a timeout matched
+to what it costs, and CI builds before it tests rather than twice.
+
+*Image.* `COPY backend/data/ ./data/` cannot resolve a directory that is not
+there, and every file in `backend/data/` is ignored — so the developer machine
+has 359 MB in it and a fresh checkout has no such directory. Copying a directory
+tolerates an *empty* one, not an *absent* one. A committed `.gitkeep` plus a
+`.dockerignore` re-include, guarded by a test broken three ways to prove it.
+
+**The unfixed part:** unpinned dependencies mean a release can still turn CI red
+with no change to our source. Making the test robust was the right fix for the
+test; it is not a fix for reproducibility.
+
+### D-088 · The provenance page is generated from the table that runs
+**2026-09-10** — A lawyer must be able to check our encoding against the decree
+in under a minute. The obvious way to build that page is to write the encoding
+out in prose beside the clause — and that prose is a second copy of the law which
+drifts the first time someone edits one and not the other. Silently, because
+nothing executes prose.
+
+So `registry/explain.py` generates every sentence from `rule.bands`. Five bands
+in the decree, five steps on the page, and changing the table changes the page.
+
+The sentences are built from `gap_to` and never `gap_from`, because `gap_to` is
+the bound the evaluator actually matches on. The schema already refuses a file
+where the two disagree, so they cannot drift — but a page describing a boundary
+nothing enforces would be worse than no page at all.
+
+**The signature is recomputed on every request, never echoed from the file.** A
+tampered rule carries a tampered signature block quite happily. And the review
+notes are published rather than hidden: they record where the decree is ambiguous
+and we had to choose, which is the difference between provenance and marketing.
+
+### D-089 · `/evidence-pack` takes inputs, never a record
+**2026-09-10** — `build_pack` refuses anything that is not an `EvaluationRecord`,
+and a test walks the import graph to prove no language model can reach the
+document path. None of that survives an HTTP endpoint that accepts a record: one
+posted over the wire arrives already looking like a verdict we computed, carrying
+our citation, our signature and our name.
+
+The endpoint therefore takes the same body as `/evaluate` and recomputes. There
+is no request shape that lets a caller choose what the document says. The shared
+path also carries the audit append, so a third endpoint cannot produce an
+evaluation the log never saw.
+
+**A HUMAN_REVIEW_REQUIRED outcome still produces a pack.** It is not a
+consolation prize: it is the document naming which facts were missing and which
+rule would have applied, and it is the one a person takes to the Rental Dispute
+Centre when we could not answer. Withholding it would leave them with nothing at
+exactly the moment they need something.
+
+Plain text, not PDF. T2.5 is deferred and the Malayalam glyph work it needs is
+real; the text pack is complete, correct and printable today.
+
+### D-090 · Deriving is offered only when it can actually happen
+**2026-09-10** — The checker now asks for an area, a property type and a number
+of bedrooms and derives the market average itself. The comparables database is
+optional at boot (D-074) and is absent from the published image, so `/areas`
+answering 503 is a supported state rather than a fault.
+
+When it does, the choice disappears, the manual path stays, and the page says we
+cannot work out an average right now. The alternative — showing the control and
+failing on submit — offers a person a button that cannot work, which is the same
+mistake as the language switcher in D-065.
+
+### D-091 · `executescript` silently ended the transaction it was inside
+**2026-09-10** — The migration runner opened a transaction, called
+`executescript`, and rolled back on failure. `executescript` **issues a COMMIT
+before it runs**, so the transaction was already gone: a migration failing
+half-way would leave the schema partly changed, and the `rollback` in the
+handler raised "cannot rollback - no transaction is active", losing the name of
+the migration that actually failed.
+
+Found by the test written for it — `test_a_failed_migration_is_not_recorded_as_applied`
+— rather than by reading the code, which looked correct.
+
+Statements are now executed one at a time inside the transaction, split with
+`sqlite3.complete_statement` rather than on `;`: the parser SQLite ships knows a
+semicolon inside a string or a trigger body does not end a statement, and a hand
+split would work on today's migrations and break on the first one containing
+either.
+
+### D-092 · Consent is a log, not a boolean
+**2026-09-10** — G8 says an opt-out cannot be undone. The obvious implementation
+is a `granted` column, and the obvious bug is that anything holding a connection
+can set it back to true — a retry, a replayed webhook, a "re-confirm consent"
+step added in good faith next year.
+
+So there is no boolean. `consent` is append-only and `opt_out` is **absorbing**:
+`has()` answers false whenever one exists, whatever was written afterwards.
+Irreversibility is a property of the shape of the data rather than the care of
+every future caller. Proven by breaking it — replacing the check with a
+latest-event read turns three tests red.
+
+`opt_out` also cancels armed deadlines in the same transaction, because
+honouring an opt-out from tomorrow is not honouring it.
+
+**One test needed renaming.** `test_opting_out_cancels_anything_already_scheduled`
+stayed green when the cancellation was removed, because `due()` independently
+excludes opted-out calls. Defence in depth working — but the name claimed the
+test pinned the write path, and it did not. It is now named for the outcome, and
+says which tests pin each half.
+
+### D-093 · A retry replays the document rather than producing another
+**2026-09-10** — A voice agent retries: the network stalls, the tool call times
+out, the platform sends it again. The caller must experience one action because
+there was one action.
+
+`Idempotency-Key` on `/evidence-pack` returns **the stored bytes**, not a fresh
+render that happens to match — a pack quoted in a hearing must be the pack we
+produced, and a re-render after a rule is re-signed would differ under the same
+reference.
+
+**The same key with a different body is a 409.** This is the half that is easy
+to leave out and it is the one that matters: without it, a client reusing a key
+by mistake — a constant, a badly seeded generator, a copied line — receives
+somebody else's document. The stored request fingerprint turns a data leak into
+a loud error.
+
+Also fixed here: `TOOL_TIMEOUT_SECONDS` was declared in settings and applied to
+nothing. There are no outbound calls yet, so `bayyina/outbound.py` exists now
+with a test asserting nothing else in the package constructs an httpx client —
+because a timeout added after the first outbound call is written is a timeout
+added after it has already shipped without one.
+
+### D-094 · A documented example that no longer works is worse than none
+**2026-09-10** — A reader copies it, gets a 422, and concludes the API is broken.
+So the OpenAPI examples are executed by a test rather than trusted.
+
+That test proved nothing on its first attempt. The `/evaluate` dwelling example
+**503s on the absent comparables database before the evaluator ever inspects the
+inputs**, and 503 was in the accepted set — so renaming a field in the example
+left the test green. Confirmed by breaking it.
+
+The check that works reads each documented example against the signed rule it
+names: every input must be one the rule declares, and every required
+non-derived input must be present. No database, no network, and it fails on
+exactly the mistake the round-trip misses.

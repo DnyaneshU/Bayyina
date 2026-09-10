@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 
 import { ApiError, api, type HealthResponse } from "./api/client";
 import Checker from "./components/Checker";
+import Provenance from "./components/Provenance";
 import {
   AVAILABLE_LANGUAGES,
   LANGUAGES,
@@ -30,6 +31,10 @@ export default function App() {
   );
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Two sections, held in state rather than routed. A router is a dependency and
+  // a URL scheme, and neither earns its place until there is a page worth
+  // linking to from outside — which is T2.7's problem, not this one's.
+  const [section, setSection] = useState<"check" | "provenance">("check");
 
   useEffect(() => {
     applyLanguage(language);
@@ -95,7 +100,25 @@ export default function App() {
         </p>
       )}
 
-      <Checker />
+      <nav aria-label={t("nav.sections")} className="mb-6 flex flex-wrap gap-1">
+        {(["check", "provenance"] as const).map((name) => (
+          <button
+            key={name}
+            type="button"
+            onClick={() => setSection(name)}
+            aria-current={section === name ? "page" : undefined}
+            className={`rounded border px-3 py-2 text-sm ${
+              section === name
+                ? "border-ink-700 bg-ink-700 text-white"
+                : "border-edge bg-paper-raised text-ink-700"
+            }`}
+          >
+            {t(`nav.${name}`)}
+          </button>
+        ))}
+      </nav>
+
+      {section === "check" ? <Checker /> : <Provenance />}
 
       <footer className="mt-10 space-y-1 border-t border-rule pt-4 text-xs text-ink-500">
         <p>{t("disclosure.notAdvice")}</p>

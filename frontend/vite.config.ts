@@ -23,6 +23,8 @@ export default defineConfig({
       "/healthz": { target: "http://localhost:8000", changeOrigin: true },
       "/comparables": { target: "http://localhost:8000", changeOrigin: true },
       "/areas": { target: "http://localhost:8000", changeOrigin: true },
+      "/provenance": { target: "http://localhost:8000", changeOrigin: true },
+      "/evidence-pack": { target: "http://localhost:8000", changeOrigin: true },
     },
   },
 

@@ -1,19 +1,24 @@
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { ApiError, api, type EvaluationRecord } from "../api/client";
+import { ApiError, api, type Dwelling, type EvaluationRecord } from "../api/client";
 
 /**
  * The rent-increase checker.
  *
- * Three amounts in, one result out, with the clause it came from. The market
- * average is entered by hand for now — automatic comparables arrive in T2.3 —
- * and that is stated on the field rather than hidden, because an answer built on
- * a figure the reader supplied is only as good as that figure.
- *
- * The request therefore omits `contract_count`, which makes the backend return
+ * The market average can come from one of two places, and which one it was is
+ * never left implicit. Give us the area, property type and bedrooms and we
+ * derive the figure from registered tenancy contracts, recording it as ours.
+ * Supply the figure yourself and we apply the rule to exactly that number,
+ * recording it as yours — and omitting `contract_count`, so the backend returns
  * CLEAR_WITH_CONDITIONS naming `market_average_not_derived`. Sending an invented
  * count to obtain a clean CLEAR would be fabricating evidence.
+ *
+ * Deriving is offered only when the service can actually do it. The comparables
+ * database is optional at boot (D-074) and absent from the published image, so
+ * `/areas` answering 503 is a supported state: the choice disappears, the manual
+ * path stays, and the page says why rather than presenting a control that
+ * cannot work.
  */
 
 const RENT_RULE = "rent_increase.dubai.decree_43_2013";
@@ -52,6 +57,24 @@ const OUTCOME_COLOUR: Record<EvaluationRecord["state"], string> = {
   HUMAN_REVIEW_REQUIRED: "var(--color-review)",
 };
 
+/**
+ * Hand the reader a file.
+ *
+ * A blob and an anchor rather than navigating to the endpoint: the pack is a
+ * POST, and it must not be reachable by URL. A link someone could paste into a
+ * chat would be a link to a document about their tenancy.
+ */
+function saveTextFile(text: string, filename: string): void {
+  const url = URL.createObjectURL(new Blob([text], { type: "text/plain" }));
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
 function formatAed(value: string | number | undefined): string {
   if (value === undefined) return "";
   const amount = Number(value);
@@ -69,7 +92,7 @@ function formatPercent(value: string | number | undefined): string {
 }
 
 export default function Checker() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [values, setValues] = useState<Record<FieldName, string>>(EMPTY);
   const [errors, setErrors] = useState<Partial<Record<FieldName, string>>>({});
   const [record, setRecord] = useState<EvaluationRecord | null>(null);
@@ -77,9 +100,50 @@ export default function Checker() {
   const [busy, setBusy] = useState(false);
   const [showSource, setShowSource] = useState(false);
 
+  // Where the market average comes from. `null` while we are still finding out
+  // whether we can derive one at all.
+  const [areas, setAreas] = useState<string[] | null>(null);
+  const [marketUsable, setMarketUsable] = useState<boolean | null>(null);
+  const [mode, setMode] = useState<"derive" | "manual">("manual");
+  const [dwelling, setDwelling] = useState<{
+    area: string;
+    kind: Dwelling["kind"];
+    bedrooms: string;
+  }>({ area: "", kind: "flat", bedrooms: "" });
+  const [dwellingErrors, setDwellingErrors] = useState<Record<string, string>>({});
+  const [packBusy, setPackBusy] = useState(false);
+  const [packError, setPackError] = useState<string | null>(null);
+
+  useEffect(() => {
+    // The comparables database is optional at boot (D-074) and absent from the
+    // published image, so `/areas` answering 503 is a supported state rather
+    // than a fault. When it does, we say plainly that we cannot work out an
+    // average and leave the manual path working — which is the whole product
+    // minus one convenience, not a broken page.
+    api
+      .areas()
+      .then((response) => {
+        setAreas(response.areas);
+        setMarketUsable(true);
+        setMode("derive");
+      })
+      .catch(() => {
+        setAreas([]);
+        setMarketUsable(false);
+        setMode("manual");
+      });
+  }, []);
+
+  /** The money fields this mode actually asks for. */
+  function activeFields() {
+    return mode === "derive"
+      ? FIELDS.filter((field) => field.name !== "market_average_rent")
+      : FIELDS;
+  }
+
   function validate(): boolean {
     const found: Partial<Record<FieldName, string>> = {};
-    for (const { name } of FIELDS) {
+    for (const { name } of activeFields()) {
       const raw = values[name].trim();
       if (!raw) found[name] = t("validation.required");
       else if (!/^\d+(\.\d{1,2})?$/.test(raw))
@@ -87,7 +151,64 @@ export default function Checker() {
       else if (Number(raw) <= 0) found[name] = t("validation.mustBePositive");
     }
     setErrors(found);
-    return Object.keys(found).length === 0;
+
+    const dwellingFound: Record<string, string> = {};
+    if (mode === "derive") {
+      if (!dwelling.area.trim()) dwellingFound.area = t("validation.pickArea");
+      const bedrooms = dwelling.bedrooms.trim();
+      if (!/^\d{1,2}$/.test(bedrooms))
+        dwellingFound.bedrooms = t("validation.bedrooms");
+    }
+    setDwellingErrors(dwellingFound);
+
+    return (
+      Object.keys(found).length === 0 && Object.keys(dwellingFound).length === 0
+    );
+  }
+
+  /** The evaluation, built once so the checker and the pack cannot disagree. */
+  function buildRequest() {
+    const common = {
+      rule_id: RENT_RULE,
+      // Strings, never numbers: rent is currency and the backend refuses a float.
+      inputs: {
+        current_annual_rent: values.current_annual_rent.trim(),
+        proposed_annual_rent: values.proposed_annual_rent.trim(),
+      } as Record<string, string>,
+      input_sources: {
+        current_annual_rent: "caller_stated",
+        proposed_annual_rent: "caller_stated",
+      } as Record<string, string>,
+    };
+
+    if (mode === "derive") {
+      // The dwelling instead of a figure. The backend looks up the comparable
+      // and records the source as ours, so we never label a derived number as
+      // caller-supplied or the reverse.
+      return {
+        ...common,
+        dwelling: {
+          area: dwelling.area.trim(),
+          kind: dwelling.kind,
+          bedrooms: Number(dwelling.bedrooms.trim()),
+        },
+      };
+    }
+
+    return {
+      ...common,
+      inputs: {
+        ...common.inputs,
+        market_average_rent: values.market_average_rent.trim(),
+      },
+      input_sources: {
+        ...common.input_sources,
+        market_average_rent: "user_supplied",
+      },
+      // No contract_count: we did not derive this figure, and saying we did
+      // would be inventing evidence.
+      market: { snapshot_id: "user_supplied" },
+    };
   }
 
   async function onSubmit(event: FormEvent) {
@@ -97,24 +218,7 @@ export default function Checker() {
 
     setBusy(true);
     try {
-      const result = await api.evaluate({
-        rule_id: RENT_RULE,
-        // Strings, never numbers: rent is currency and the backend refuses a float.
-        inputs: {
-          current_annual_rent: values.current_annual_rent.trim(),
-          market_average_rent: values.market_average_rent.trim(),
-          proposed_annual_rent: values.proposed_annual_rent.trim(),
-        },
-        input_sources: {
-          current_annual_rent: "caller_stated",
-          market_average_rent: "user_supplied",
-          proposed_annual_rent: "caller_stated",
-        },
-        // No contract_count: we did not derive this figure, and saying we did
-        // would be inventing evidence.
-        market: { snapshot_id: "user_supplied" },
-      });
-      setRecord(result);
+      setRecord(await api.evaluate(buildRequest()));
     } catch (error) {
       setFailure(
         error instanceof ApiError
@@ -126,12 +230,35 @@ export default function Checker() {
     }
   }
 
+  async function downloadPack(reference: string) {
+    setPackError(null);
+    setPackBusy(true);
+    try {
+      // The evaluation is posted again, not the record. The backend recomputes
+      // the verdict rather than trusting anything this browser assembled, which
+      // is what makes the document worth carrying into a hearing (G10).
+      const text = await api.evidencePack({
+        ...buildRequest(),
+        caller_ref: reference,
+        language: i18n.language,
+      });
+      saveTextFile(text, `bayyina-${reference}.txt`);
+    } catch {
+      // The result on screen is untouched. Losing the download must not look
+      // like losing the answer.
+      setPackError(t("pack.failed"));
+    } finally {
+      setPackBusy(false);
+    }
+  }
+
   function reset() {
     setValues(EMPTY);
     setErrors({});
     setRecord(null);
     setFailure(null);
     setShowSource(false);
+    setPackError(null);
   }
 
   if (record) {
@@ -141,6 +268,9 @@ export default function Checker() {
         showSource={showSource}
         onToggleSource={() => setShowSource((open) => !open)}
         onReset={reset}
+        onDownload={() => downloadPack(record.eval_id)}
+        packBusy={packBusy}
+        packError={packError}
       />
     );
   }
@@ -152,7 +282,139 @@ export default function Checker() {
         <p className="mt-1 text-sm text-ink-500">{t("checker.intro")}</p>
       </div>
 
-      {FIELDS.map(({ name, labelKey, helpKey }) => (
+      {marketUsable === false && (
+        <p className="rounded bg-paper-raised p-3 text-sm text-ink-700">
+          {t("source.unavailable")}
+        </p>
+      )}
+
+      {marketUsable === true && (
+        <fieldset>
+          <legend className="font-medium">{t("source.heading")}</legend>
+          <div className="mt-2 space-y-2">
+            {(["derive", "manual"] as const).map((option) => (
+              <label
+                key={option}
+                htmlFor={`source-${option}`}
+                className="flex items-start gap-2"
+              >
+                <input
+                  id={`source-${option}`}
+                  type="radio"
+                  name="source"
+                  value={option}
+                  checked={mode === option}
+                  onChange={() => setMode(option)}
+                  className="mt-1"
+                />
+                <span>
+                  <span className="font-medium">{t(`source.${option}`)}</span>
+                  <span className="block text-sm text-ink-500">
+                    {t(`source.${option}Help`)}
+                  </span>
+                </span>
+              </label>
+            ))}
+          </div>
+        </fieldset>
+      )}
+
+      {mode === "derive" && (
+        <>
+          <div>
+            <label htmlFor="area" className="block font-medium">
+              {t("field.area")}
+            </label>
+            <p id="area-help" className="mt-1 mb-2 text-sm text-ink-500">
+              {t("field.areaHelp")}
+            </p>
+            <input
+              id="area"
+              name="area"
+              type="text"
+              list="area-options"
+              autoComplete="off"
+              value={dwelling.area}
+              aria-describedby={dwellingErrors.area ? "area-error" : "area-help"}
+              aria-invalid={dwellingErrors.area ? true : undefined}
+              onChange={(event) =>
+                setDwelling((current) => ({ ...current, area: event.target.value }))
+              }
+              className="w-full rounded border border-edge bg-paper-raised px-3 py-2 text-lg"
+            />
+            {/*
+              A datalist rather than a select: 184 areas in a dropdown is a
+              scroll, and a person who knows their area wants to type it.
+            */}
+            <datalist id="area-options">
+              {(areas ?? []).map((name) => (
+                <option key={name} value={name} />
+              ))}
+            </datalist>
+            {dwellingErrors.area && (
+              <p id="area-error" role="alert" className="mt-1 text-sm text-danger">
+                {dwellingErrors.area}
+              </p>
+            )}
+          </div>
+
+          <div>
+            <label htmlFor="kind" className="block font-medium">
+              {t("field.propertyType")}
+            </label>
+            <select
+              id="kind"
+              name="kind"
+              value={dwelling.kind}
+              onChange={(event) =>
+                setDwelling((current) => ({
+                  ...current,
+                  kind: event.target.value as Dwelling["kind"],
+                }))
+              }
+              className="mt-2 w-full rounded border border-edge bg-paper-raised px-3 py-2 text-lg"
+            >
+              <option value="flat">{t("field.flat")}</option>
+              <option value="villa">{t("field.villa")}</option>
+            </select>
+          </div>
+
+          <div>
+            <label htmlFor="bedrooms" className="block font-medium">
+              {t("field.bedrooms")}
+            </label>
+            <p id="bedrooms-help" className="mt-1 mb-2 text-sm text-ink-500">
+              {t("field.bedroomsHelp")}
+            </p>
+            <input
+              id="bedrooms"
+              name="bedrooms"
+              type="text"
+              inputMode="numeric"
+              autoComplete="off"
+              value={dwelling.bedrooms}
+              aria-describedby={
+                dwellingErrors.bedrooms ? "bedrooms-error" : "bedrooms-help"
+              }
+              aria-invalid={dwellingErrors.bedrooms ? true : undefined}
+              onChange={(event) =>
+                setDwelling((current) => ({
+                  ...current,
+                  bedrooms: event.target.value,
+                }))
+              }
+              className="tabular w-full rounded border border-edge bg-paper-raised px-3 py-2 text-lg"
+            />
+            {dwellingErrors.bedrooms && (
+              <p id="bedrooms-error" role="alert" className="mt-1 text-sm text-danger">
+                {dwellingErrors.bedrooms}
+              </p>
+            )}
+          </div>
+        </>
+      )}
+
+      {activeFields().map(({ name, labelKey, helpKey }) => (
         <div key={name}>
           <label htmlFor={name} className="block font-medium">
             {t(labelKey)}
@@ -219,11 +481,17 @@ function Result({
   showSource,
   onToggleSource,
   onReset,
+  onDownload,
+  packBusy,
+  packError,
 }: {
   record: EvaluationRecord;
   showSource: boolean;
   onToggleSource: () => void;
   onReset: () => void;
+  onDownload: () => void;
+  packBusy: boolean;
+  packError: string | null;
 }) {
   const { t } = useTranslation();
   const review = record.state === "HUMAN_REVIEW_REQUIRED";
@@ -337,6 +605,31 @@ function Result({
         {t("disclosure.provisional")}
       </p>
       <p className="text-sm text-ink-500">{t("disclosure.callerStated")}</p>
+
+      {/*
+        Offered for every outcome, including HUMAN_REVIEW_REQUIRED. That pack is
+        the document naming which facts were missing and which rule would have
+        applied — the one a person takes to the Rental Dispute Centre when we
+        could not answer. Withholding it there would leave them with nothing at
+        exactly the moment they need something.
+      */}
+      <div className="rounded border border-rule bg-paper-raised p-4">
+        <h3 className="font-medium text-ink-900">{t("pack.heading")}</h3>
+        <p className="mt-1 text-sm text-ink-500">{t("pack.intro")}</p>
+        <button
+          type="button"
+          onClick={onDownload}
+          disabled={packBusy}
+          className="mt-3 w-full rounded border border-ink-700 px-4 py-3 font-medium disabled:opacity-60"
+        >
+          {packBusy ? t("pack.preparing") : t("pack.download")}
+        </button>
+        {packError && (
+          <p role="alert" className="mt-2 text-sm text-danger">
+            {packError}
+          </p>
+        )}
+      </div>
 
       <button
         type="button"

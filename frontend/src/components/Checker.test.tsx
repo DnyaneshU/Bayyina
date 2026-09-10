@@ -49,9 +49,37 @@ function record(overrides: Record<string, unknown> = {}) {
 }
 
 function mockEvaluate(body: Record<string, unknown>, ok = true, status = 200) {
-  const fetchMock = vi.fn().mockResolvedValue({ ok, status, json: async () => body });
+  // Routed by URL. The checker asks `/areas` on mount to find out whether it can
+  // derive a market average at all; answering that with an evaluation record
+  // would put the form into derive mode and remove the field these tests fill
+  // in. 503 is the honest answer here and the one the published image gives,
+  // since the comparables database is optional at boot (D-074).
+  const fetchMock = vi.fn((input: RequestInfo | URL, _init?: RequestInit) => {
+    if (String(input).includes("/areas")) {
+      return Promise.resolve({
+        ok: false,
+        status: 503,
+        json: async () => ({ detail: "no market data" }),
+      });
+    }
+    return Promise.resolve({ ok, status, json: async () => body });
+  });
   vi.stubGlobal("fetch", fetchMock);
   return fetchMock;
+}
+
+/** The body of the POST to /evaluate, whichever call that turned out to be. */
+function evaluateBody(fetchMock: ReturnType<typeof mockEvaluate>) {
+  const call = fetchMock.mock.calls.find(
+    ([url]) => String(url).includes("/evaluate"),
+  );
+  if (!call) throw new Error("no call to /evaluate was made");
+  return JSON.parse(call[1]?.body as string);
+}
+
+/** Did the checker actually ask the backend to evaluate anything? */
+function evaluated(fetchMock: ReturnType<typeof mockEvaluate>) {
+  return fetchMock.mock.calls.some(([url]) => String(url).includes("/evaluate"));
 }
 
 async function fillAndSubmit(
@@ -157,7 +185,7 @@ describe("Checker", () => {
     await fillAndSubmit(user, "80000", "96000", "87000");
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    const body = evaluateBody(fetchMock);
 
     // Inventing a contract count to obtain a clean CLEAR would be fabricating
     // evidence. The request must not carry one.
@@ -172,7 +200,7 @@ describe("Checker", () => {
     await fillAndSubmit(user, "80000", "96000", "87000");
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    const body = evaluateBody(fetchMock);
     for (const value of Object.values(body.inputs)) {
       expect(typeof value).toBe("string");
     }
@@ -302,7 +330,7 @@ describe("Checker", () => {
     render(<Checker />);
     await user.click(screen.getByRole("button", { name: /check this increase/i }));
 
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(evaluated(fetchMock)).toBe(false);
     expect(screen.getAllByRole("alert").length).toBe(3);
   });
 

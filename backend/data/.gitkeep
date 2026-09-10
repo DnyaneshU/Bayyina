@@ -1,0 +1,10 @@
+This file exists so that `backend/data/` does.
+
+Everything the directory normally holds is ignored: the 359 MB build
+database, the raw DLD release, the audit log. Without a committed file
+the directory is absent from a fresh checkout, and the image build fails
+at `COPY backend/data/ ./data/` with `"/backend/data": not found` --
+which is exactly how CI went red while every local build stayed green.
+
+`.dockerignore` re-includes this one file for the same reason. Market
+data is optional at boot by design (D-074); the directory is not.

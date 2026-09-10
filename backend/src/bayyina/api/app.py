@@ -28,9 +28,12 @@ from bayyina.registry.loader import load_rules
 from bayyina.registry.schema import ApprovalStatus
 from bayyina.rules_logic.errors import RuleInputError, RuleLogicError
 from bayyina.settings import Settings, get_settings
+from bayyina.store.db import get_db, run_migrations
 
 from .rate_limit import add_rate_limiting
 from .routes_evaluate import router as evaluate_router
+from .routes_pack import router as pack_router
+from .routes_provenance import router as provenance_router
 from .security import add_security_headers
 
 logger = logging.getLogger("bayyina")
@@ -84,6 +87,7 @@ def create_app(
     audit_path: Path | str | None = None,
     static_dir: Path | str | None = None,
     market_db: Path | str | None = None,
+    case_db: Path | str | None = None,
     settings: Settings | None = None,
 ) -> FastAPI:
     """Build the application, or refuse to.
@@ -116,6 +120,17 @@ def create_app(
     )
     app.state.audit.path.parent.mkdir(parents=True, exist_ok=True)
 
+    # The case store. Unlike market data (D-074) this is not optional: consent,
+    # idempotency and the officer queue are not features that degrade, they are
+    # the difference between one text message and two. Migrations run at boot
+    # because a schema that lags the code is a failure at the first write, and
+    # they are idempotent so every boot can do it.
+    store_path = Path(case_db) if case_db is not None else Path(settings.data_dir) / "cases.db"
+    app.state.store = get_db(store_path)
+    applied = run_migrations(app.state.store)
+    if applied:
+        logger.info("case store migrated: %s", ", ".join(applied))
+
     # Market data is optional at boot, and deliberately so. The rules engine, the
     # notice rule and a caller-supplied market figure all work without it, and a
     # service that refuses to start because one dataset is missing takes down
@@ -145,6 +160,8 @@ def create_app(
     add_response_timing(app)
     _register_error_handlers(app)
     app.include_router(evaluate_router)
+    app.include_router(provenance_router)
+    app.include_router(pack_router)
 
     # Mounted last, so it can never shadow an API route: FastAPI matches in the
     # order routes are added, and a mount at "/" catches everything after it.

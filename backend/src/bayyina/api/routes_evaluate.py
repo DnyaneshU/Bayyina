@@ -54,7 +54,62 @@ class DwellingIn(BaseModel):
 
 
 class EvaluateRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    # Two examples, because the two ways to obtain a market figure are the thing
+    # a reader of these docs most needs to understand — and supplying both at
+    # once is the mistake the endpoint refuses.
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "examples": [
+                {
+                    "summary": "We derive the market figure from registered contracts",
+                    "description": (
+                        "Give the dwelling and no market figure. The comparable is "
+                        "looked up and recorded as ours (G9)."
+                    ),
+                    "value": {
+                        "rule_id": "rent_increase.dubai.decree_43_2013",
+                        "inputs": {
+                            "current_annual_rent": "80000",
+                            "proposed_annual_rent": "96000",
+                        },
+                        "input_sources": {
+                            "current_annual_rent": "caller_stated",
+                            "proposed_annual_rent": "caller_stated",
+                        },
+                        "dwelling": {
+                            "area": "Al Barsha First",
+                            "kind": "flat",
+                            "bedrooms": 2,
+                        },
+                    },
+                },
+                {
+                    "summary": "The caller supplies the market figure",
+                    "description": (
+                        "No `contract_count`, so the outcome is "
+                        "CLEAR_WITH_CONDITIONS naming `market_average_not_derived`. "
+                        "Inventing a count to obtain a clean CLEAR would be "
+                        "fabricating evidence."
+                    ),
+                    "value": {
+                        "rule_id": "rent_increase.dubai.decree_43_2013",
+                        "inputs": {
+                            "current_annual_rent": "80000",
+                            "proposed_annual_rent": "96000",
+                            "market_average_rent": "87000",
+                        },
+                        "input_sources": {
+                            "current_annual_rent": "caller_stated",
+                            "proposed_annual_rent": "caller_stated",
+                            "market_average_rent": "user_supplied",
+                        },
+                        "market": {"snapshot_id": "user_supplied"},
+                    },
+                },
+            ]
+        },
+    )
 
     rule_id: str = Field(min_length=1)
 
@@ -88,6 +143,20 @@ def evaluate(request: Request, body: EvaluateRequest) -> EvaluationRecord:
     Returns **200 with a HUMAN_REVIEW_REQUIRED record** when the evidence does
     not support an answer. That is an outcome, not a failure: returning it as a
     4xx would teach every client to treat the honest case as an error.
+    """
+    return evaluate_request(request, body)
+
+
+def evaluate_request(request: Request, body: EvaluateRequest) -> EvaluationRecord:
+    """Run a rule and log it. The one path from a request to a record.
+
+    Shared with `/evidence-pack`, which must not accept a record from a client:
+    a pack is built from what we computed, never from what someone posted. That
+    is guardrail G10 at the network edge — the type check inside `build_pack`
+    cannot help if the record arrived over HTTP already assembled.
+
+    The audit append lives here rather than in each caller, so that adding a
+    third endpoint cannot produce an evaluation the log never saw.
     """
     market = MarketEvidence(**body.market.model_dump()) if body.market else None
     inputs = dict(body.inputs)

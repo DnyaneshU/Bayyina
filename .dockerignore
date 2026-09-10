@@ -30,6 +30,10 @@ backend/data/
 # comparables, areas and provenance. The build database beside it is 359 MB of
 # contract rows the request path never reads, and stays out.
 !backend/data/comparables.duckdb
+# ...and the placeholder, so the directory itself exists in the build
+# context. Docker cannot COPY a directory that is not there, and a
+# checkout without market data has nothing else in backend/data/.
+!backend/data/.gitkeep
 
 # --- Not needed at runtime --------------------------------------------------
 backend/tests/

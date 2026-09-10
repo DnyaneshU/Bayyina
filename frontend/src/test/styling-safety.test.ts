@@ -2,7 +2,7 @@ import { execSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 
 /**
  * Styling that silently does nothing.
@@ -20,6 +20,48 @@ import { describe, expect, it } from "vitest";
 
 const SRC = join(__dirname, "..");
 const ROOT = join(SRC, "..");
+
+/**
+ * A production build, run once for the whole file.
+ *
+ * Six tests below read the built stylesheet, and each used to build it itself
+ * when `dist/` was missing. Under Vitest's default 5 s timeout that is a coin
+ * toss: a cold `vite build` takes about a second on a developer's machine and
+ * **7 s on a single core**, which is what a CI runner gives you. The build is
+ * not slow because anything is wrong - it compiles Tailwind and subsets six
+ * font faces. So it gets a hook with a timeout that reflects what it actually
+ * costs, and the tests reading its output keep the ordinary one.
+ *
+ * Source is not the artifact. Everything checked below is present in
+ * `index.css` and could still be absent from what ships - a dropped
+ * `@font-face` or a mangled attribute selector fails silently, which is the
+ * whole reason D-021 exists.
+ *
+ * The minifier rewrites `html[dir="rtl"]` to `html[dir=rtl]`, so the tests
+ * match the built form rather than the authored one.
+ */
+const BUILD_TIMEOUT_MS = 180_000;
+
+let cachedCss: string | null = null;
+
+function ensureBuilt(): void {
+  if (!existsSync(join(ROOT, "dist", "assets"))) {
+    execSync("npm run build", { cwd: ROOT, stdio: "ignore" });
+  }
+}
+
+function builtCss(): string {
+  if (cachedCss === null) {
+    ensureBuilt();
+    cachedCss = readdirSync(join(ROOT, "dist", "assets"))
+      .filter((file) => file.endsWith(".css"))
+      .map((file) => readFileSync(join(ROOT, "dist", "assets", file), "utf8"))
+      .join("\n");
+  }
+  return cachedCss;
+}
+
+beforeAll(ensureBuilt, BUILD_TIMEOUT_MS);
 
 /** The v3 form: a bracketed CSS variable. Silently inert under v4. */
 const V3_ARBITRARY_VARIABLE =
@@ -60,15 +102,7 @@ describe("styling safety", () => {
   it("emits a real rule for every colour utility the interface uses", () => {
     // The only check that would have caught the invisible button: build, then
     // read the CSS and confirm the class actually exists in it.
-    const dist = join(ROOT, "dist", "assets");
-    if (!existsSync(dist)) {
-      execSync("npm run build", { cwd: ROOT, stdio: "ignore" });
-    }
-
-    const css = readdirSync(join(ROOT, "dist", "assets"))
-      .filter((file) => file.endsWith(".css"))
-      .map((file) => readFileSync(join(ROOT, "dist", "assets", file), "utf8"))
-      .join("\n");
+    const css = builtCss();
 
     const used = new Set<string>();
     for (const file of walk(SRC, [".tsx"])) {
@@ -107,24 +141,6 @@ describe("styling safety", () => {
 });
 
 describe("the design system survives the build", () => {
-  /**
-   * Source is not the artifact. Everything below is present in `index.css` and
-   * could still be absent from what ships — a dropped `@font-face` or a mangled
-   * attribute selector fails silently, which is the whole reason D-021 exists.
-   *
-   * The minifier rewrites `html[dir="rtl"]` to `html[dir=rtl]`, so these match
-   * the built form rather than the authored one.
-   */
-  function builtCss(): string {
-    const dist = join(ROOT, "dist", "assets");
-    if (!existsSync(dist)) {
-      execSync("npm run build", { cwd: ROOT, stdio: "ignore" });
-    }
-    return readdirSync(join(ROOT, "dist", "assets"))
-      .filter((file) => file.endsWith(".css"))
-      .map((file) => readFileSync(join(ROOT, "dist", "assets", file), "utf8"))
-      .join("\n");
-  }
 
   it("still mirrors the layout for RTL", () => {
     // Without this rule Arabic renders left to right and nothing throws.
@@ -205,14 +221,7 @@ describe("what ships is only what the markup asked for", () => {
      * `bg-[--x]` is escaped as `.bg-\[--x]`, so the four characters `-\[--` are
      * enough to find one and cannot be got wrong.
      */
-    const dist = join(ROOT, "dist", "assets");
-    if (!existsSync(dist)) {
-      execSync("npm run build", { cwd: ROOT, stdio: "ignore" });
-    }
-    const css = readdirSync(dist)
-      .filter((file) => file.endsWith(".css"))
-      .map((file) => readFileSync(join(dist, file), "utf8"))
-      .join("\n");
+    const css = builtCss();
 
     const marker = "-\\[--";
     const leaked = css

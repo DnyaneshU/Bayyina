@@ -1495,7 +1495,7 @@ door.
 
 ---
 
-## T2.5 — PDF rendering and font validation ⚠ WILL BITE
+## T2.5 — PDF rendering and font validation ⚠ WILL BITE — DEFERRED by decision
 
 **Files:** `src/bayyina/evidence/render.py`, `assets/fonts/`
 **Test:** `tests/evidence/test_render.py`
@@ -1519,16 +1519,16 @@ conjuncts render.
 
 **Files:** `backend/src/bayyina/api/routes_provenance.py`, `frontend/src/components/Provenance.tsx`
 
-- [ ] Render encoded logic beside the verbatim clause, with the official link,
+- [x] Render encoded logic beside the verbatim clause, with the official link,
       signature and approval status
-- [ ] Test that an unknown rule returns 404 and that the page shows `provisional`
+- [x] Test that an unknown rule returns 404 and that the page shows `provisional`
 
 **DoD:** A lawyer who has never seen the codebase can verify an encoding against
 source in under a minute. **Time this with a real person.**
 
 ---
 
-## T2.7 — Web checker v2
+## T2.7 — Web checker v2 — ✅ except the three-language switcher (blocked on translation)
 
 - [ ] Full flow: property details → automatic comparable → verdict → pack download
 - [ ] Render the `HUMAN_REVIEW_REQUIRED` state properly — **it is a feature, not
@@ -1539,7 +1539,7 @@ source in under a minute. **Time this with a real person.**
 
 ---
 
-## T2.8 — Comprehension test ⚠ CUSTOMER GATE
+## T2.8 — Comprehension test ⚠ CUSTOMER GATE — BLOCKED on ar/ml templates
 
 **No code. This is the customer-first gate.**
 
@@ -1573,7 +1573,7 @@ listed in the file structure with nothing creating the storage they depend on.
 Tables: `cases`, `evidence_packs`, `deadlines`, `consent`, `audit`, `idempotency`.
 **Every table carries `call_id`** so one identifier threads the whole journey.
 
-- [ ] **Write the failing tests**
+- [x] **Write the failing tests**
 
 ```python
 # tests/store/test_migrations.py
@@ -1620,18 +1620,18 @@ def test_no_agent_reachable_status_is_terminal(db, sample_pack):
     assert case.status not in TERMINAL_STATUSES
 ```
 
-- [ ] **Run, confirm failure**
-- [ ] **Implement.** `TERMINAL_STATUSES = frozenset({"approved", "rejected",
+- [x] **Run, confirm failure**
+- [x] **Implement.** `TERMINAL_STATUSES = frozenset({"approved", "rejected",
       "amended"})` — set only through the officer interface. `Cases.create()` has
       no parameter that can produce one
-- [ ] **Run, confirm pass**
+- [x] **Run, confirm pass**
 
 **DoD:** Opt-out is irreversible and proven by test. WAL is on. Migrations run
 twice without error. G4 is asserted, not assumed.
 
 ---
 
-## T2.10 — Failure taxonomy and tool behaviour ⚠ VOICE-CRITICAL · Track A
+## T2.10 — Failure taxonomy and tool behaviour ⚠ VOICE-CRITICAL · Track A — ✅ except `/dispatch` and `/deadline`, which are Phase 3 tools
 
 **Files:** `src/bayyina/api/errors.py`, `agent/scripts/*/failures.md`
 **Test:** `tests/api/test_failures.py`
@@ -1667,12 +1667,12 @@ dispatch sends one SMS, proven by test.** No failure produces silence.
 Written now, not in the final week. It is a **Stage 2 deliverable** and it is also
 how a judge forms their first impression of the engineering.
 
-- [ ] Write `README.md`: what it is, the one sentence, quickstart from
+- [x] Write `README.md`: what it is, the one sentence, quickstart from
       `.env.example`, architecture in one diagram, the guardrail table, how to
       sign a rule, how to run the tests, the latency budget as a stated commitment
-- [ ] Curate the FastAPI OpenAPI output — every endpoint gets a description and an
+- [x] Curate the FastAPI OpenAPI output — every endpoint gets a description and an
       example
-- [ ] **Include the tamper demo as a documented, reproducible procedure** — a
+- [x] **Include the tamper demo as a documented, reproducible procedure** — a
       reader must be able to run the wow moment themselves in three commands
 
 **DoD:** A stranger clones the repo and has it running from the README alone. The

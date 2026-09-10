@@ -10,6 +10,8 @@ These are the checks that only fail at deploy time, which is the worst time.
 """
 
 import re
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -138,21 +140,40 @@ def test_the_dev_proxy_forwards_every_backend_route():
     """
     import tempfile
 
-    from fastapi.routing import APIRoute
-
     from bayyina.api.app import create_app
 
     config = (ROOT / "frontend" / "vite.config.ts").read_text(encoding="utf-8")
     app = create_app(audit_path=Path(tempfile.mkdtemp()) / "audit.jsonl")
 
-    served = {
-        route.path
-        for route in app.routes
-        if isinstance(route, APIRoute) and not route.path.startswith("/openapi")
-    }
+    # The generated OpenAPI document, not `app.routes`.
+    #
+    # This walked the route table matching `isinstance(route, APIRoute)` until
+    # FastAPI 0.141 / Starlette 1.6 stopped flattening included routers onto the
+    # application: the paths now sit behind an internal `_IncludedRouter` and the
+    # match found nothing. Asserting against a framework's private route objects
+    # means a dependency release can turn this red with no change to our source,
+    # which is exactly what happened. The OpenAPI schema is the published
+    # contract and names precisely the paths the API answers on.
+    #
+    # It also excludes what it should: `/docs`, `/redoc` and `/openapi.json` are
+    # plain Starlette routes rather than API operations, and the built frontend
+    # is a Mount, so none of them appear here and none of them need proxying.
+    served = set(app.openapi()["paths"])
     assert served, "no API routes found — has the app changed?"
 
-    missing = [path for path in sorted(served) if f'"{path}"' not in config]
+    # Vite matches proxy keys as path *prefixes*, so `/provenance` forwards
+    # `/provenance/rent_increase...` too. Comparing whole paths would demand a
+    # config entry per path template - `/provenance/{rule_id}` and every future
+    # one - which is not how the dev server works and would train whoever hits
+    # it to add noise until the test went quiet.
+    proxied = set(re.findall(r'"(/[^"]*)":\s*\{\s*target', config))
+    assert proxied, "no proxy entries found - has vite.config.ts changed shape?"
+
+    missing = [
+        path
+        for path in sorted(served)
+        if not any(path == prefix or path.startswith(prefix + "/") for prefix in proxied)
+    ]
     assert not missing, (
         f"these backend routes are not proxied in frontend/vite.config.ts, so they "
         f"404 in development: {missing}"
@@ -195,6 +216,56 @@ def test_the_directory_is_copied_rather_than_the_file():
     dockerfile = DOCKERFILE.read_text(encoding="utf-8")
     assert "COPY backend/data/comparables.duckdb" not in dockerfile, (
         "copying the file directly makes a build without market data fail"
+    )
+
+
+def test_the_data_directory_survives_a_checkout_with_no_market_data():
+    """The image build needs `backend/data/` to exist. Nothing in it is committed.
+
+    Every file the directory normally holds is ignored - the 359 MB build
+    database, the raw release, the audit log - so a fresh clone has no
+    `backend/data/` at all and Docker fails at `COPY backend/data/ ./data/`
+    with `"/backend/data": not found`. Copying the directory rather than the
+    file (above) tolerates an *empty* directory, not an *absent* one.
+
+    This is why the image job went red while every local build stayed green:
+    the developer machine has 359 MB of market data sitting in that directory
+    and the CI runner has none. A committed placeholder is what closes the gap.
+    """
+    keep = ROOT / "backend" / "data" / ".gitkeep"
+    assert keep.is_file(), (
+        "backend/data/.gitkeep is missing, so a clean checkout has no "
+        "backend/data/ and `COPY backend/data/ ./data/` cannot resolve"
+    )
+
+    # The directory disappeared from CI because *everything* in it is ignored,
+    # not because anyone forgot to `git add`. So the property under test is that
+    # this one path is not ignored: a later `backend/data/*` rule would silently
+    # undo the fix and turn the image build red again, here and nowhere else.
+    #
+    # Guarded on the checkout rather than on the binary. Running this from an
+    # extracted tarball - which is what the container build does - there is no
+    # repository to ask, and a `git` that answers 128 for "not a repository"
+    # would otherwise read as a pass.
+    if shutil.which("git") and (ROOT / ".git").exists():
+        ignored = subprocess.run(
+            ["git", "check-ignore", "-q", "backend/data/.gitkeep"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+        )
+        # 0 means git ignores it; 1 means it does not. Anything else is git
+        # failing to answer, and a test must not read that as success.
+        assert ignored.returncode == 1, (
+            "backend/data/.gitkeep is excluded by .gitignore, so it cannot reach "
+            "a checkout, backend/data/ will not exist there, and the image build "
+            "fails at `COPY backend/data/ ./data/` exactly as it did before"
+        )
+
+    ignored = DOCKERIGNORE.read_text(encoding="utf-8")
+    assert "!backend/data/.gitkeep" in ignored, (
+        "the placeholder is excluded from the build context, so backend/data/ "
+        "is empty again and Docker cannot copy it"
     )
 
 

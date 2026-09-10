@@ -82,7 +82,13 @@ class Settings(BaseSettings):
     # Applied to every public route except /healthz, which platforms poll.
     public_rate_limit_per_minute: int = 30
 
-    # NOT YET CONSUMED - T2.10, the outbound timeout on agent-facing webhooks.
+    # The budget for anything this process calls out to. httpx defaults to
+    # five seconds; three is the number here because three seconds of silence
+    # on a phone call is already long and five is a caller who has hung up.
+    #
+    # Consumed by `bayyina.outbound`, which is the only place allowed to build
+    # an HTTP client - a test asserts nothing else in the package does, so the
+    # first outbound call cannot ship without this applied.
     tool_timeout_seconds: int = 3
 
     @model_validator(mode="after")

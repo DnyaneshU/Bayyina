@@ -200,6 +200,73 @@ An AI system that will not run on unreviewed logic.
 
 ---
 
+## The API
+
+Every endpoint is documented at `/docs`, with a request example you can copy. A
+test asserts each one carries a summary, a description and a working example, and
+another asserts the examples name inputs the signed rules actually declare — so
+the docs cannot drift from what the service accepts.
+
+| Endpoint | What it is for |
+|---|---|
+| `POST /evaluate` | Run a rule and get the evaluation record, with the clause it came from. |
+| `POST /evidence-pack` | The same evaluation, rendered as the document a resident takes to a hearing. |
+| `GET /evidence-pack/languages` | Which languages a pack can be produced in. Derived from the templates on disk. |
+| `GET /provenance` | Every rule in the corpus, with its approval state. |
+| `GET /provenance/{rule_id}` | One rule: the clause verbatim, our encoding of it, and the signature. |
+| `GET /comparables` | What places like this rent for, or why we will not say. |
+| `GET /areas` | Every area a comparable can be looked up for. |
+| `GET /healthz` | Corpus signature state, rule count, and whether market data is loaded. |
+
+### Checking our encoding against the decree
+
+`GET /provenance/{rule_id}` is the page a lawyer opens. It puts the published
+clause beside our encoding of it, **generated from the same band table the
+evaluator reads** — five bands in Decree 43, five steps on the page — so a
+summary cannot drift from the logic that runs.
+
+```bash
+curl -s localhost:8000/provenance/rent_increase.dubai.decree_43_2013 | jq '.encoded'
+```
+
+The signature on that page is **recomputed on every request**, never echoed from
+the file: a tampered rule carries a tampered signature block quite happily. The
+review notes are published rather than hidden, because they record where the
+decree is ambiguous and we had to choose.
+
+### The document a resident takes away
+
+```bash
+curl -s -X POST localhost:8000/evidence-pack   -H 'Content-Type: application/json'   -H 'Idempotency-Key: call-1-pack-1'   -d '{"rule_id":"rent_increase.dubai.decree_43_2013",
+       "inputs":{"current_annual_rent":"80000","proposed_annual_rent":"96000",
+                 "market_average_rent":"87000"},
+       "input_sources":{"current_annual_rent":"caller_stated",
+                        "proposed_annual_rent":"caller_stated",
+                        "market_average_rent":"user_supplied"},
+       "market":{"snapshot_id":"user_supplied"},
+       "caller_ref":"BYN-4821","language":"en"}'
+```
+
+It takes **inputs, never a record.** A verdict posted over HTTP would arrive
+looking exactly like one we computed, carrying our citation and our name, so the
+endpoint recomputes instead. There is no request shape that lets a caller choose
+what the document says.
+
+Send `Idempotency-Key` and a retry replays the first document rather than
+producing a second — the stored bytes, not a fresh render that happens to match.
+The same key with a *different* body is a **409**, because without that check a
+client reusing a key by mistake receives somebody else's document.
+
+A `HUMAN_REVIEW_REQUIRED` outcome still produces a pack. It names which facts
+were missing and which rule would have applied, and it is the one a person takes
+to the Rental Dispute Centre when we could not answer.
+
+An untranslated language is **refused, not silently Englished**: an English pack
+for a Malayalam reader is a failed delivery, and a fallback is how that happens
+without anyone noticing.
+
+---
+
 ## Quickstart
 
 ```bash

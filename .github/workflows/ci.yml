@@ -63,11 +63,16 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      - name: Test
-        run: npm test
-
+      # Build before Test, for two reasons. The styling tests read the built
+      # stylesheet and will produce it themselves if it is missing, so this
+      # ordering stops CI building the same bundle twice. It also means a broken
+      # build is reported by the step named Build, rather than surfacing as a
+      # timeout inside a test about colour contrast.
       - name: Build
         run: npm run build
+
+      - name: Test
+        run: npm test
 
   # The image is the deliverable at T1.9, so a Dockerfile that does not build is
   # a broken deploy discovered at the worst moment. This also runs the corpus

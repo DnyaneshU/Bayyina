@@ -29,7 +29,11 @@
     "noticeServed": "When they told you",
     "currentRentHelp": "The annual rent on your current contract.",
     "proposedRentHelp": "The annual rent they are asking for.",
-    "marketAverage": "Market average for a similar property"
+    "marketAverage": "Market average for a similar property",
+    "areaHelp": "Start typing and pick your area from the list.",
+    "bedroomsHelp": "Enter 0 for a studio.",
+    "flat": "Flat",
+    "villa": "Villa"
   },
   "result": {
     "marketAverage": "Market average",
@@ -69,7 +73,9 @@
   "validation": {
     "required": "Enter an amount.",
     "notANumber": "Enter an amount in numbers, like 80000.",
-    "mustBePositive": "Enter an amount greater than zero."
+    "mustBePositive": "Enter an amount greater than zero.",
+    "pickArea": "Pick an area from the list.",
+    "bedrooms": "Enter the number of bedrooms, or 0 for a studio."
   },
   "condition": {
     "heading": "This answer rests on one thing we could not check",
@@ -81,5 +87,56 @@
     "heading": "This needs a person to look at it",
     "body": "We found {{count}} comparable registered contracts — too few to give you a market comparison we can stand behind, so we are not going to quote one.",
     "stillTrue": "The rule and its source are below. They do not depend on the market comparison."
+  },
+  "provenance": {
+    "heading": "How we encoded the rules",
+    "intro": "Every answer cites a clause. This is where you check that clause against what we actually run. The published text is on one side, our encoding of it on the other.",
+    "open": "Check this encoding",
+    "back": "All rules",
+    "sourceHeading": "What the published text says",
+    "encodedHeading": "What we encoded",
+    "stepCondition": "If",
+    "stepOutcome": "Then",
+    "inputsHeading": "What the rule needs",
+    "inputDerived": "We work this out from registered contracts.",
+    "inputStated": "You tell us this.",
+    "notesHeading": "Where we had to interpret",
+    "notesIntro": "The published text does not settle every case. These are the readings we chose, and what a qualified lawyer must confirm before this rule is certified.",
+    "signatureHeading": "Signature",
+    "signatureExplained": "A hash of the rule's own bytes, recomputed each time this page loads. If anyone edits a rule without re-signing it, the service refuses to start.",
+    "signatureMatches": "The signature matches the rule we are running.",
+    "signatureMismatch": "The signature does not match the rule we are running. Do not rely on this encoding.",
+    "computedSignature": "What we computed",
+    "statusHeading": "Review status",
+    "clause": "Clause",
+    "source": "Published by",
+    "effectiveFrom": "In force from",
+    "loading": "Loading the rules",
+    "empty": "No rules are loaded."
+  },
+  "approval": {
+    "unsigned": "Not signed",
+    "provisional": "Pending review by a qualified lawyer",
+    "certified": "Reviewed by a qualified lawyer"
+  },
+  "nav": {
+    "sections": "Sections",
+    "check": "Check an increase",
+    "provenance": "How we encoded the rules"
+  },
+  "source": {
+    "heading": "Where should the market average come from?",
+    "derive": "Work it out from registered contracts",
+    "deriveHelp": "Tell us the area, the property type and the number of bedrooms. We take the middle rent from tenancy contracts registered with Dubai Land Department for properties like yours.",
+    "manual": "I already have the figure",
+    "manualHelp": "Enter the average annual rent for a similar property yourself.",
+    "unavailable": "We cannot work out market averages right now, so enter the figure yourself. Everything else works as normal."
+  },
+  "pack": {
+    "heading": "Take this with you",
+    "intro": "A plain-text report with the outcome, the figures you gave, and the clause it came from. Print it or keep it on your phone.",
+    "download": "Download my case report",
+    "preparing": "Preparing your report",
+    "failed": "We could not prepare that report. Your result above is unchanged."
   }
 }
