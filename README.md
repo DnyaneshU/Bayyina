@@ -26,7 +26,7 @@ in progress — T2.1, T2.2 and T2.3 complete.**
 The engine is real and reachable: two signed rules, a deterministic evaluator, a
 hash-chained audit log, and a live `POST /evaluate` · `GET /healthz`, under **331
 backend and 70 frontend tests**, with a working web checker the whole product
-serves from a single process. A verdict takes ~3 ms against a 150 ms budget, and
+serves from a single process. A verdict takes **5.9 ms at p95** against a 150 ms budget, and
 the public routes are rate limited.
 
 **Real market data is in, and the product answers from it.** 9,798,685

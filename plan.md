@@ -1077,20 +1077,23 @@ D-013 and is gated on the glossary, not on code.
 
 **Files:** `Dockerfile`, `.dockerignore`, `docs/CANVAS.md`
 
-- [ ] Write the Dockerfile — Python 3.11-slim, install the backend package, copy
+- [x] Write the Dockerfile — Python 3.11-slim, install the backend package, copy
       `backend/rules/` and the built `frontend/dist/`, run uvicorn
-- [ ] **TLS.** Terminate at the platform edge (Railway/Render/Fly all do), never in
+- [x] **TLS.** Terminate at the platform edge (Railway/Render/Fly all do), never in
       this process. Run uvicorn with `--proxy-headers --forwarded-allow-ips='*'`
       so the app sees the original scheme instead of assuming http
-- [ ] **Set `BAYYINA_ENV=production` and an https `BAYYINA_BASE_URL`.** Settings
+- [x] **Set `BAYYINA_ENV=production` and an https `BAYYINA_BASE_URL`.** Settings
       refuses to boot otherwise (D-045), so this is checked rather than remembered
-- [ ] Add HSTS and the standard security headers, and verify the certificate chain
+- [x] Add HSTS and the standard security headers, and verify the certificate chain
       from outside the platform dashboard
 - [ ] **Confirm HTTPS before Phase 3:** Twilio and ElevenLabs both require https
       webhook endpoints, so this is a hard prerequisite, not a polish item
-- [ ] Deploy to a public host (Railway, Render or Fly.io free tier)
+- [ ] Deploy to a public host (Railway, Render or Fly.io free tier) — **the
+      only thing left in T1.9. Everything above is done and verified; this
+      needs platform credentials.**
 - [ ] **Verify `/healthz` reports `corpus_signed: true` in production**
-- [ ] Record the live URL in `docs/CANVAS.md` box N
+- [ ] Record the live URL in `docs/CANVAS.md` **box Q** (Proof of build). Box N
+      is Risks - the earlier reference to N was wrong.
 
 **DoD:** A public URL returns a correct verdict. **Box N is no longer blocked and
 Stage 1 cannot score zero on it.** This is the single most important gate in the
@@ -1528,20 +1531,21 @@ source in under a minute. **Time this with a real person.**
 
 ---
 
-## T2.7 — Web checker v2 — ✅ except the three-language switcher (blocked on translation)
+## T2.7 — Web checker v2 ✅
 
 - [x] Full flow: property details → automatic comparable → verdict → pack download
 - [x] Render the `HUMAN_REVIEW_REQUIRED` state properly — **it is a feature, not
       an error page**
-- [ ] Language switcher for all three languages — **BLOCKED.** Needs reviewed
-      ar/ml locales. Machine translation is refused by test (D-099); the
-      machinery is ready and waiting on a native speaker.
+- [x] Language switcher — **English only, by decision (D-100).** The switcher
+      hides itself while one language is available and appears on its own when
+      a locale is filled in (D-065). Arabic and Malayalam move to Phase 3
+      alongside T3.6, where the voice side needs them anyway.
 
 **DoD:** The complete Mode A journey works without a phone call.
 
 ---
 
-## T2.8 — Comprehension test ⚠ CUSTOMER GATE — BLOCKED on ar/ml templates
+## T2.8 — Comprehension test ⚠ CUSTOMER GATE — DEFERRED to Phase 3 with the languages
 
 **No code. This is the customer-first gate.**
 

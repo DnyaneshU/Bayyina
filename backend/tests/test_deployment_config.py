@@ -372,3 +372,126 @@ def test_the_image_installs_the_same_set_the_tests_ran_against(dockerfile):
     assert re.search(r"COPY .*constraints\.txt", dockerfile), (
         "constraints.txt is used but never copied into the build"
     )
+
+
+def test_no_operational_data_is_tracked_in_the_repository():
+    """`backend/data/` holds real people, not fixtures.
+
+    Consent records, case rows and the full body of every evidence pack live in
+    `cases.db`. The ignore rules covered `*.duckdb` and `*.jsonl` because those
+    were the formats at the time; SQLite arrived with the case store and was
+    committed before anyone noticed — 28 cases and 167 pack bodies, synthetic
+    that time.
+
+    The next time it would not be synthetic, so this asserts the rule rather
+    than trusting that whoever adds the next storage format remembers.
+    """
+    if not shutil.which("git") or not (ROOT / ".git").exists():
+        pytest.skip("not a git checkout")
+
+    tracked = subprocess.run(
+        ["git", "ls-files", "backend/data/"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    ).stdout.split()
+
+    # The placeholder is the one thing that must be here: without it the
+    # directory does not exist in a checkout and the image build fails.
+    offenders = [path for path in tracked if not path.endswith(".gitkeep")]
+    assert not offenders, (
+        "these hold operational data and must not be in the repository:\n  "
+        + "\n  ".join(offenders)
+        + "\n\nUntrack them with `git rm --cached <path>` and commit."
+    )
+
+
+# --- The Hugging Face Space ---------------------------------------------------
+
+
+SPACE = ROOT / "deploy" / "huggingface"
+
+
+def _space_frontmatter() -> dict:
+    text = (SPACE / "README.md").read_text(encoding="utf-8")
+    assert text.startswith("---\n"), "the Space card has no YAML frontmatter"
+    return yaml.safe_load(text.split("---", 2)[1])
+
+
+def test_the_space_declares_the_port_the_container_actually_serves():
+    """Spaces route to `app_port`, and the default is 7860.
+
+    Get this wrong and the build succeeds, the container starts, and the Space
+    shows a blank page forever — because nothing is listening where Hugging Face
+    is looking.
+    """
+    declared = _space_frontmatter()["app_port"]
+    dockerfile = DOCKERFILE.read_text(encoding="utf-8")
+
+    assert f"EXPOSE {declared}" in dockerfile, (
+        f"the Space routes to {declared} and the Dockerfile does not expose it"
+    )
+    assert f'"--port", "{declared}"' in dockerfile, (
+        f"the Space routes to {declared} and uvicorn does not bind it"
+    )
+
+
+def test_the_space_builds_from_our_dockerfile():
+    front = _space_frontmatter()
+    assert front["sdk"] == "docker", "a Python SDK Space would ignore the Dockerfile"
+    assert DOCKERFILE.is_file()
+
+
+def test_the_space_card_does_not_overstate_what_this_is():
+    """The card is the first thing anyone reads, so the disclosures live there too.
+
+    A Space page describing a rent checker without saying it is not legal advice
+    is the same failure as a pack without the disclosure, in the place most
+    people will actually see.
+    """
+    # Whitespace-normalised: the card is prose wrapped at 80 columns, so a
+    # phrase the test looks for is routinely split across a line break.
+    raw = (SPACE / "README.md").read_text(encoding="utf-8").lower()
+    text = " ".join(raw.split())
+
+    assert "not legal advice" in text
+    assert "not an official determination" in text
+    assert "not a government entity" in text
+    assert "rera" in text, "the card must not let our figure read as the official index"
+
+
+def test_the_deploy_script_refuses_to_ship_secrets_or_case_data():
+    """A Space is public, and a leaked case is not recoverable by deleting it."""
+    script = (SPACE / "deploy.py").read_text(encoding="utf-8")
+
+    for forbidden in (".env", "audit.jsonl", "cases.db", "market.duckdb"):
+        assert f'"{forbidden}"' in script, (
+            f"{forbidden} is not on the deploy script's forbidden list"
+        )
+    assert "assert_nothing_secret" in script
+
+
+def test_the_deploy_script_carries_the_market_data():
+    """The one thing the GitHub tree does not have, and the reason it exists."""
+    script = (SPACE / "deploy.py").read_text(encoding="utf-8")
+    assert "backend/data/comparables.duckdb" in script
+
+
+def test_the_deploy_script_does_not_enumerate_the_project():
+    """It stages `git ls-files`, not a hand-written list.
+
+    The first version listed the paths and left out `frontend/tsconfig.test.json`,
+    which `tsconfig.json` references - so `tsc -b` failed and the image did not
+    build. A list of "what the project consists of" drifts the first time
+    somebody adds a file, and it drifts silently until a deploy.
+
+    Taking the tracked set means the Space builds the tree CI already proves.
+    """
+    script = (SPACE / "deploy.py").read_text(encoding="utf-8")
+
+    assert "git" in script and "ls-files" in script, (
+        "the deploy script no longer derives its file list from git"
+    )
+    assert "INCLUDE = (" not in script, (
+        "an enumerated include list is back; it will drift and only a deploy will notice"
+    )

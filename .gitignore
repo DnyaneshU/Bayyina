@@ -33,6 +33,17 @@ backend/data/raw/
 backend/data/*.duckdb
 backend/data/*.duckdb.wal
 
+# The case store, and the two files SQLite keeps beside it. This holds consent
+# records, case rows and the full body of every evidence pack — operational data
+# about real people. The patterns above covered DuckDB and JSON Lines because
+# those were the formats at the time; SQLite arrived later and was committed
+# before anyone noticed, which is exactly why the test below exists.
+backend/data/*.db
+backend/data/*.db-wal
+backend/data/*.db-shm
+backend/data/*.sqlite
+backend/data/*.sqlite3
+
 # The audit log holds caller-stated facts - rents, dates, areas. It is real
 # operational data about real people and must never reach the repository.
 backend/data/*.jsonl

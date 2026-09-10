@@ -1547,3 +1547,27 @@ unreviewed template becoming deliverable the moment someone drops in a file.
 **T2.7's language switcher and T2.8 remain blocked on a person, by this project's
 own rule.** That is the honest state, and it is now a short piece of work for
 whoever that person is rather than an open-ended one.
+
+### D-100 · English at Stage 1, the other two languages with the voice work
+**2026-09-10** — D-099 left Arabic and Malayalam blocked on a native speaker and
+T2.8 unable to run. Rather than hold Phase 2 open on someone we have not yet
+contacted, the interface and the pack ship in English.
+
+This is not a retreat from the three-language promise; it is D-065 applied
+honestly. A switcher offering a language that renders half in English is a broken
+control however carefully it is captioned, and a machine translation of what a
+landlord may lawfully charge is worse than an English document the reader can at
+least recognise as not theirs.
+
+The switcher already hides itself while one language is available and appears on
+its own the moment a locale is filled in. Nothing needs rewriting when the
+translations arrive — they land in `LABELS`, `MONTHS`, `pack.txt.j2` and the
+locale files, and the marker comes off.
+
+**T2.8 moves with them.** Running a comprehension gate on a machine draft would
+produce false confidence: it tests wording nobody will ship. The gate belongs
+beside T3.6, where the voice side needs the same translations.
+
+What survives into Phase 3 unchanged is the reason the gate exists — that a
+correct answer nobody understands is a failed answer. That is worth running in
+English against two readers who are not us, and it costs an afternoon.
