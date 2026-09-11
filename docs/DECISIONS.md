@@ -1641,3 +1641,30 @@ The tracked-data test changed too, and the distinction it encodes is worth
 stating: **not file format, but whether the contents are about a person.**
 `comparables.duckdb` is permitted; `cases.db` and `audit.jsonl` are not, and the
 test names them that way.
+
+### D-103 · The container takes the port the platform gives it
+**2026-09-11** — The first Render deploy failed, and the build log succeeded from
+top to bottom. The image built, the container started, uvicorn logged that it was
+serving. Nothing in the output said what was wrong.
+
+`CMD` bound port 8000. Render — like most platforms that take a container — sets
+`PORT` and routes traffic to *that*, defaulting it to 10000. So the load balancer
+knocked on 10000, the health check on `/healthz` never connected, and the deploy
+was marked failed while the process inside was perfectly healthy on a port nobody
+was asking about.
+
+`--port ${PORT:-8000}` now. The default is what keeps everything else working
+untouched: `docker run -p 8000:8000`, fly.toml's `internal_port`, the Space
+card's `app_port`, and every container check in CI. A platform that assigns a
+port gets honoured; one that does not gets 8000.
+
+Shell form, because `${PORT:-8000}` needs a shell to expand. **`exec`**, because
+without it the shell stays PID 1: SIGTERM reaches `sh` and not uvicorn, the
+lifespan shutdown never runs, and the case store closes by being killed — which
+is exactly how a WAL is left needing recovery (D-095). Verified: `docker stop`
+now logs "Application shutdown complete" and exits 0 rather than 137.
+
+Three tests hold it together, and the third is the one that would otherwise rot:
+the container must read `$PORT`, the Space card's `app_port` must equal the
+container's default, and fly.toml's `internal_port` must equal it too. Each names
+a platform that would silently serve a blank page if the two ever disagreed.

@@ -493,12 +493,33 @@ def _space_frontmatter() -> dict:
     return yaml.safe_load(text.split("---", 2)[1])
 
 
-def test_the_space_declares_the_port_the_container_actually_serves():
+def test_the_container_honours_the_port_the_platform_gives_it():
+    """Render sets PORT and routes to it. Ours listened on 8000 regardless.
+
+    That is a deploy that fails with a build log which succeeded from top to
+    bottom: the image builds, the container starts, uvicorn logs that it is
+    serving — and the load balancer is knocking on a different door, so the
+    health check never answers. Nothing in the output says "wrong port".
+    """
+    dockerfile = DOCKERFILE.read_text(encoding="utf-8")
+
+    assert "${PORT:-8000}" in dockerfile, (
+        "the container hardcodes its port, so any platform that assigns one "
+        "will fail its health check"
+    )
+    assert "exec uvicorn" in dockerfile, (
+        "without exec, SIGTERM reaches the shell rather than uvicorn, the "
+        "lifespan shutdown never runs, and the case store is killed rather "
+        "than closed"
+    )
+
+
+def test_the_space_declares_the_port_the_container_defaults_to():
     """Spaces route to `app_port`, and the default is 7860.
 
-    Get this wrong and the build succeeds, the container starts, and the Space
-    shows a blank page forever — because nothing is listening where Hugging Face
-    is looking.
+    Hugging Face sets no PORT, so the container falls back to its default and
+    that is what the Space card must name. Get it wrong and the build succeeds,
+    the container starts, and the Space shows a blank page forever.
     """
     declared = _space_frontmatter()["app_port"]
     dockerfile = DOCKERFILE.read_text(encoding="utf-8")
@@ -506,9 +527,19 @@ def test_the_space_declares_the_port_the_container_actually_serves():
     assert f"EXPOSE {declared}" in dockerfile, (
         f"the Space routes to {declared} and the Dockerfile does not expose it"
     )
-    assert f'"--port", "{declared}"' in dockerfile, (
-        f"the Space routes to {declared} and uvicorn does not bind it"
+    assert f"${{PORT:-{declared}}}" in dockerfile, (
+        f"the Space routes to {declared} and that is not the container's default"
     )
+
+
+def test_fly_routes_to_the_same_default():
+    """Fly sets no PORT either; `internal_port` must match the fallback."""
+    fly = (ROOT / "fly.toml").read_text(encoding="utf-8")
+    dockerfile = DOCKERFILE.read_text(encoding="utf-8")
+
+    match = re.search(r"internal_port\s*=\s*(\d+)", fly)
+    assert match, "fly.toml declares no internal_port"
+    assert f"${{PORT:-{match.group(1)}}}" in dockerfile
 
 
 def test_the_space_builds_from_our_dockerfile():

@@ -89,8 +89,22 @@ EXPOSE 8000
 # edge, so the original scheme and client address arrive in X-Forwarded-*.
 # Without these the app believes every request is plain HTTP from the proxy —
 # which would suppress HSTS and collapse the rate limiter onto one client.
-CMD ["uvicorn", "bayyina.api.app:app", \
-     "--host", "0.0.0.0", \
-     "--port", "8000", \
-     "--proxy-headers", \
-     "--forwarded-allow-ips", "*"]
+# `${PORT:-8000}`, not a hard 8000. Render, and most platforms that take a
+# container, set PORT and route traffic to *that* - Render defaults it to 10000.
+# A container listening on 8000 while the load balancer knocks on 10000 fails its
+# health check and the deploy is marked failed, on a build log that succeeded from
+# top to bottom. Nothing in it says "wrong port".
+#
+# The default keeps everything else working unchanged: `docker run -p 8000:8000`,
+# fly.toml's internal_port, the Space card's app_port, and every container check
+# in CI.
+#
+# Shell form, because `${PORT:-8000}` needs a shell to expand it. `exec`, so that
+# uvicorn replaces the shell as PID 1 - without it SIGTERM reaches `sh` and not
+# uvicorn, the lifespan shutdown never runs, and the case store closes by being
+# killed, which is how a WAL is left needing recovery.
+CMD ["sh", "-c", "exec uvicorn bayyina.api.app:app \
+     --host 0.0.0.0 \
+     --port ${PORT:-8000} \
+     --proxy-headers \
+     --forwarded-allow-ips '*'"]
